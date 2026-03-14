@@ -8,3 +8,5 @@ build/
 *.spec
 venv/
 
+
+__pycache__
