@@ -490,13 +490,17 @@ class App:
             if not s:
                 self.git.log(f"删除失败: {m}", "ERROR")
                 return
-            
-            msg = f"Delete: {item_name}"
-            s, m = run_command(f'git commit -m "{msg}"', cwd=self.git.cwd)
-            if not s and "nothing to commit" not in m.lower():
-                self.git.log(f"提交失败: {m}", "ERROR")
-                return
-            
+        
+        self.add_to_gitignore(item_name)
+        run_command('git add .gitignore', cwd=self.git.cwd)
+        
+        msg = f"Delete: {item_name}"
+        s, m = run_command(f'git commit -m "{msg}"', cwd=self.git.cwd)
+        if not s and "nothing to commit" not in m.lower() and "no changes added to commit" not in m.lower():
+            self.git.log(f"提交失败: {m}", "ERROR")
+            return
+        
+        if s:
             # 明确推送到当前或 main 分支
             status = self.git.get_status()
             branch = status.get("branch", "main")
@@ -505,9 +509,7 @@ class App:
             s, m = run_command(f"git push origin {branch}", cwd=self.git.cwd)
             if not s:
                 self.git.log(f"推送失败: {m}", "ERROR")
-                # 即使推送失败，我们也继续尝试更新本地忽略
         
-        self.add_to_gitignore(item_name)
         self.refresh_file_list() # 同步 UI 状态
         self.git.updated_items[item_name] = 'D'
         self.git.log(f"已删除: {item_name}", "SUCCESS")
@@ -518,16 +520,19 @@ class App:
         
         self.remove_from_gitignore(item_name)
         
-        s, m = run_command(f'git add "{item_name}"', cwd=self.git.cwd)
-        if not s:
-            self.git.log(f"添加失败: {m}", "ERROR")
-            self.refresh_file_list()
-            return
+        # 同时 stage gitignore 变更和目标文件
+        run_command('git add .gitignore', cwd=self.git.cwd)
+        run_command(f'git add "{item_name}"', cwd=self.git.cwd)
         
         msg = f"Add: {item_name}"
         s, m = run_command(f'git commit -m "{msg}"', cwd=self.git.cwd)
-        if not s and "nothing to commit" not in m.lower():
+        if not s and "nothing to commit" not in m.lower() and "no changes added to commit" not in m.lower():
             self.git.log(f"提交失败: {m}", "ERROR")
+            self.refresh_file_list()
+            return
+        
+        if not s:
+            self.git.log("没有新文件需要推送", "WARN")
             self.refresh_file_list()
             return
         
