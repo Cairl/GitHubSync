@@ -90,6 +90,7 @@ class Colors:
     MAGENTA = "\033[95m"
     CYAN = "\033[96m"
     WHITE = "\033[97m"
+    STRIKETHROUGH = "\033[9m"
     BG_BLUE = "\033[48;2;69;71;90m"     # 选中的背景色 (柔和深灰色/蓝灰色)
     BG_RESET = "\033[49m"
 
@@ -723,15 +724,18 @@ class App:
 
                 padding = " " * (max_cn_width - get_display_width(cn_text))
                 tag_text = f"{Colors.DIM}(已忽略){Colors.RESET}" if ignored else ""
+                
+                # 被忽略时同时应用淡色 (DIM) 和删除线 (STRIKETHROUGH)
+                ignored_style = f"{Colors.DIM}{Colors.STRIKETHROUGH}" if ignored else ""
 
                 if is_selected:
                     if self.action_index == 0:
-                        line = f" {status_indicator} {Colors.BG_BLUE}{Colors.BOLD}{cn_text} {Colors.RESET}{padding}  {action_text} {tag_text}"
+                        line = f" {status_indicator} {Colors.BG_BLUE}{Colors.BOLD}{ignored_style}{cn_text} {Colors.RESET}{padding}  {action_text} {tag_text}"
                     else:
                         action_color = Colors.GREEN if ignored else Colors.RED
-                        line = f" {status_indicator} {cn_text}{padding}  {Colors.BG_BLUE}{Colors.BOLD}{action_color} {action_text} {Colors.RESET}{tag_text}"
+                        line = f" {status_indicator} {ignored_style}{cn_text}{Colors.RESET if ignored else ''}{padding}  {Colors.BG_BLUE}{Colors.BOLD}{action_color} {action_text} {Colors.RESET}{tag_text}"
                 else:
-                    line = f" {status_indicator} {cn_text}{padding}   {action_text} {tag_text}"
+                    line = f" {status_indicator} {ignored_style}{cn_text}{Colors.RESET if ignored else ''}{padding}   {action_text} {tag_text}"
 
                 lines.append(line)
             
