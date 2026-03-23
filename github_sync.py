@@ -681,16 +681,36 @@ class App:
                 "请使用 '同步' 进行初始化"
             ]
         
-        lines.extend(self.get_box_lines(status_lines))
-        lines.append("")
+        # 手动构建框：顶边 + 状态行 + 分隔线 + 文件列表 + 底边
+        box_width = 60
+        TL, TR = '╭', '╮'
+        BL, BR = '╰', '╯'
+        H, V = '─', '│'
 
-        # 菜单渲染 (左对齐 + 淡色英文)
-        if self.first_sync_done:
-            # 动态计算分配给文件列表的高度：预留至少 8 行给日志，10 行给头部和分割线
+        # 顶边
+        lines.append(f"{Colors.CYAN}{TL}" + H * (box_width - 2) + f"{TR}{Colors.RESET}")
+
+        # 状态行: │ + space + content + padding + │
+        for line in status_lines:
+            clean_line = strip_ansi(line)
+            visible_len = get_display_width(clean_line)
+            padding = box_width - visible_len - 3
+            lines.append(f"{Colors.CYAN}{V}{Colors.RESET} {line}" + " " * padding + f"{Colors.CYAN}{V}{Colors.RESET}")
+
+        # 文件列表 (在框内部)
+        if self.first_sync_done and self.options:
+            # 动态计算分配给文件列表的高度
             reserved_for_logs = 8
             reserved_for_header = 10
             max_file_height = max(3, term_height - reserved_for_header - reserved_for_logs)
-            
+
+            # 分隔线 + 倒计时 (在同一行，有边框，淡灰实体线)
+            rem = max(0, min(box_width - 4, self.timeout_seconds))
+            elap = (box_width - 4) - rem
+            timer_bar = f"{Colors.DIM}{'─' * rem}{Colors.DIM}{'┄' * elap}{Colors.RESET}"
+            sep_line = f"{Colors.CYAN}│{Colors.RESET} " + timer_bar + f" {Colors.CYAN}│{Colors.RESET}"
+            lines.append(sep_line)
+
             # 如果文件较多，实现简单的滚动窗口
             display_start = 0
             display_options = self.options
@@ -700,10 +720,12 @@ class App:
                 if end == len(self.options):
                     display_start = max(0, end - max_file_height)
                 display_options = self.options[display_start:end]
-                
+
                 # 添加更多指示器
-                if display_start > 0: lines.append(f"   {Colors.DIM}↑ 更多文件...{Colors.RESET}")
-            
+                if display_start > 0:
+                    indicator = f"{Colors.CYAN}│{Colors.RESET}  {Colors.DIM}↑ 更多...{Colors.RESET}"
+                    lines.append(indicator + " " * (box_width - 18) + f"{Colors.CYAN}│{Colors.RESET}")
+
             max_cn_width = 0
             for opt in display_options:
                 max_cn_width = max(max_cn_width, get_display_width(opt['name']))
@@ -711,7 +733,7 @@ class App:
             for i, option in enumerate(display_options):
                 actual_index = display_start + i
                 is_selected = (actual_index == self.selected_index)
-                
+
                 cn_text = option['name']
                 ignored = option.get('ignored', False)
                 action_text = "推送" if ignored else "删除"
@@ -723,31 +745,31 @@ class App:
 
                 padding = " " * (max_cn_width - get_display_width(cn_text))
                 tag_text = f"{Colors.DIM}(已忽略){Colors.RESET}" if ignored else ""
-                
+
                 # 被忽略时同时应用淡色 (DIM) 和删除线 (STRIKETHROUGH)
                 ignored_style = f"{Colors.DIM}{Colors.STRIKETHROUGH}" if ignored else ""
 
+                # 保持与原始代码相同的格式
                 if is_selected:
                     if self.action_index == 0:
-                        line = f" {status_indicator} {Colors.BG_BLUE}{Colors.BOLD}{ignored_style}{cn_text} {Colors.RESET}{padding}  {action_text} {tag_text}"
+                        line = f"{Colors.CYAN}│{Colors.RESET} {status_indicator} {Colors.BG_BLUE}{Colors.BOLD}{ignored_style}{cn_text} {Colors.RESET}{padding}  {action_text} {tag_text}"
                     else:
                         action_color = Colors.GREEN if ignored else Colors.RED
-                        line = f" {status_indicator} {ignored_style}{cn_text}{Colors.RESET if ignored else ''}{padding}  {Colors.BG_BLUE}{Colors.BOLD}{action_color} {action_text} {Colors.RESET}{tag_text}"
+                        line = f"{Colors.CYAN}│{Colors.RESET} {status_indicator} {ignored_style}{cn_text}{Colors.RESET if ignored else ''}{padding}  {Colors.BG_BLUE}{Colors.BOLD}{action_color} {action_text} {Colors.RESET}{tag_text}"
                 else:
-                    line = f" {status_indicator} {ignored_style}{cn_text}{Colors.RESET if ignored else ''}{padding}   {action_text} {tag_text}"
+                    line = f"{Colors.CYAN}│{Colors.RESET} {status_indicator} {ignored_style}{cn_text}{Colors.RESET if ignored else ''}{padding}   {action_text} {tag_text}"
 
-                lines.append(line)
-            
+                # 计算右边距使行宽等于box_width
+                visible_len = get_display_width(strip_ansi(line))
+                right_padding = max(0, box_width - visible_len - 1)
+                lines.append(line + " " * right_padding + f"{Colors.CYAN}│{Colors.RESET}")
+
             if len(self.options) > max_file_height and display_start + len(display_options) < len(self.options):
-                lines.append(f"   {Colors.DIM}↓ 更多文件...{Colors.RESET}")
-                
-            lines.append("")
+                indicator = f"{Colors.CYAN}│{Colors.RESET}  {Colors.DIM}↓ 更多...{Colors.RESET}"
+                lines.append(indicator + " " * (box_width - 18) + f"{Colors.CYAN}│{Colors.RESET}")
 
-        # 日志渲染
-        rem = max(0, min(60, self.timeout_seconds))
-        elap = 60 - rem
-        timer_bar = f"{Colors.RESET}{'─' * rem}{Colors.DIM}{'┄' * elap}{Colors.RESET}"
-        lines.append(timer_bar)
+        # 底边
+        lines.append(f"{Colors.CYAN}╰" + "─" * (box_width - 2) + f"╯{Colors.RESET}")
 
         if self.git.logs:
             lines.append("")
@@ -842,8 +864,6 @@ class App:
                             # 焦点在文件名时按回车，自动切换到操作焦点，并提示再次按键确认
                             self.action_index = 1
                         self.deadline = time.time() + 60
-                elif key == Keys.ESC or key == b'q':
-                    self.running = False
             else:
                 # 基于 deadline 计算剩余秒数，避免计时器丢帧
                 remaining = self.deadline - time.time()
@@ -852,7 +872,7 @@ class App:
                     self.running = False
                 time.sleep(0.05)
 
-        print("\n已自动退出（超时/用户操作）。")
+        print("\n已退出。")
 
 if __name__ == "__main__":
     try:
