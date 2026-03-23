@@ -243,7 +243,7 @@ class GitManager:
         
         print("\033[?25h", end="", flush=True) # 显示光标
         timestamp = datetime.now().strftime("%H:%M:%S")
-        sys.stdout.write(f" {Colors.YELLOW}[{timestamp}] 正在配置远程仓库: {Colors.RESET}")
+        sys.stdout.write(f" {Colors.DIM}[{timestamp}]{Colors.RESET} {Colors.YELLOW}正在配置远程仓库: {Colors.RESET}")
         url = get_input_with_default("", default_url).strip()
         print("\033[?25l", end="", flush=True) # 隐藏光标
 
