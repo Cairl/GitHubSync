@@ -188,28 +188,10 @@ class GitManager:
 
     def create_ignore(self):
         gitignore_path = os.path.join(self.cwd, ".gitignore")
-
-        # 需要忽略的额外文件（每次都追加）
-        extra_ignores = ["*.lnk"]
-
         if os.path.exists(gitignore_path):
-            # 检查是否已包含 *.lnk
-            try:
-                with open(gitignore_path, "r", encoding="utf-8") as f:
-                    existing = f.read()
-                needs_update = True
-                for pattern in extra_ignores:
-                    if pattern in existing:
-                        needs_update = False
-                        break
-                if needs_update:
-                    with open(gitignore_path, "a", encoding="utf-8") as f:
-                        f.write("\n" + "\n".join(extra_ignores) + "\n")
-            except Exception as e:
-                self.log(f"更新 .gitignore 失败: {e}", "ERROR")
             return
-
-        content = "__pycache__/\n*.pyc\n.env\n.DS_Store\n.vscode/\n.idea/\ndist/\nbuild/\n*.spec\nvenv/\n" + "\n".join(extra_ignores) + "\n"
+        
+        content = "__pycache__/\n*.pyc\n.env\n.DS_Store\n.vscode/\n.idea/\ndist/\nbuild/\n*.spec\nvenv/\n"
         try:
             with open(gitignore_path, "w", encoding="utf-8") as f:
                 f.write(content)
@@ -894,6 +876,9 @@ class App:
 
 if __name__ == "__main__":
     try:
+        import tkinter as tk
+        from tkinter import filedialog
+
         repo_path = ""
         if len(sys.argv) > 1:
             potential_path = sys.argv[1]
@@ -903,11 +888,13 @@ if __name__ == "__main__":
                 print(f"错误: '{potential_path}' 不是一个有效的文件夹。")
                 sys.exit(1)
         else:
-            # 无argv1时，使用脚本所在目录
-            repo_path = os.path.dirname(os.path.abspath(__file__))
+            root = tk.Tk()
+            root.withdraw()
+            repo_path = filedialog.askdirectory(title="选择 Git 仓库文件夹")
+            root.destroy()
 
         if not repo_path:
-            print("未找到有效路径，程序退出。")
+            print("未选择文件夹，程序退出。")
             sys.exit(0)
 
         app = App(repo_path)
