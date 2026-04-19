@@ -89,6 +89,7 @@ class Colors:
     BLUE = "\033[38;2;137;180;250m"     # 淡蓝色 #89B4FA
     MAGENTA = "\033[95m"
     CYAN = "\033[96m"
+    GRAY = "\033[38;2;108;112;134m"      # 灰色 #6C7086
     WHITE = "\033[97m"
     STRIKETHROUGH = "\033[9m"
     BG_BLUE = "\033[48;2;69;71;90m"     # 选中的背景色 (柔和深灰色/蓝灰色)
@@ -609,7 +610,7 @@ class App:
         else:
             self.git.log("取消删除操作", "INFO")
 
-    def get_box_lines(self, content_lines, color=Colors.CYAN):
+    def get_box_lines(self, content_lines, color=Colors.GRAY):
         lines = []
         # 设定框的总宽度（显示宽度）
         box_width = 60
@@ -688,14 +689,14 @@ class App:
         H, V = '─', '│'
 
         # 顶边
-        lines.append(f"{Colors.CYAN}{TL}" + H * (box_width - 2) + f"{TR}{Colors.RESET}")
+        lines.append(f"{Colors.GRAY}{TL}" + H * (box_width - 2) + f"{TR}{Colors.RESET}")
 
         # 状态行: │ + space + content + padding + │
         for line in status_lines:
             clean_line = strip_ansi(line)
             visible_len = get_display_width(clean_line)
             padding = box_width - visible_len - 3
-            lines.append(f"{Colors.CYAN}{V}{Colors.RESET} {line}" + " " * padding + f"{Colors.CYAN}{V}{Colors.RESET}")
+            lines.append(f"{Colors.GRAY}{V}{Colors.RESET} {line}" + " " * padding + f"{Colors.GRAY}{V}{Colors.RESET}")
 
         # 文件列表 (在框内部)
         if self.first_sync_done and self.options:
@@ -708,7 +709,7 @@ class App:
             rem = max(0, min(box_width - 4, self.timeout_seconds))
             elap = (box_width - 4) - rem
             timer_bar = f"{Colors.DIM}{'─' * rem}{Colors.DIM}{'┄' * elap}{Colors.RESET}"
-            sep_line = f"{Colors.CYAN}│{Colors.RESET} " + timer_bar + f" {Colors.CYAN}│{Colors.RESET}"
+            sep_line = f"{Colors.GRAY}│{Colors.RESET} " + timer_bar + f" {Colors.GRAY}│{Colors.RESET}"
             lines.append(sep_line)
 
             # 如果文件较多，实现简单的滚动窗口
@@ -723,8 +724,8 @@ class App:
 
                 # 添加更多指示器
                 if display_start > 0:
-                    indicator = f"{Colors.CYAN}│{Colors.RESET}  {Colors.DIM}↑ 更多...{Colors.RESET}"
-                    lines.append(indicator + " " * (box_width - 18) + f"{Colors.CYAN}│{Colors.RESET}")
+                    indicator = f"{Colors.GRAY}│{Colors.RESET}  {Colors.DIM}↑ 更多...{Colors.RESET}"
+                    lines.append(indicator + " " * (box_width - 18) + f"{Colors.GRAY}│{Colors.RESET}")
 
             max_cn_width = 0
             for opt in display_options:
@@ -752,24 +753,24 @@ class App:
                 # 保持与原始代码相同的格式
                 if is_selected:
                     if self.action_index == 0:
-                        line = f"{Colors.CYAN}│{Colors.RESET} {status_indicator} {Colors.BG_BLUE}{Colors.BOLD}{ignored_style}{cn_text} {Colors.RESET}{padding}  {action_text} {tag_text}"
+                        line = f"{Colors.GRAY}│{Colors.RESET} {status_indicator} {Colors.BG_BLUE}{Colors.BOLD}{ignored_style}{cn_text} {Colors.RESET}{padding}  {action_text} {tag_text}"
                     else:
                         action_color = Colors.GREEN if ignored else Colors.RED
-                        line = f"{Colors.CYAN}│{Colors.RESET} {status_indicator} {ignored_style}{cn_text}{Colors.RESET if ignored else ''}{padding}  {Colors.BG_BLUE}{Colors.BOLD}{action_color} {action_text} {Colors.RESET}{tag_text}"
+                        line = f"{Colors.GRAY}│{Colors.RESET} {status_indicator} {ignored_style}{cn_text}{Colors.RESET if ignored else ''}{padding}  {Colors.BG_BLUE}{Colors.BOLD}{action_color} {action_text} {Colors.RESET}{tag_text}"
                 else:
-                    line = f"{Colors.CYAN}│{Colors.RESET} {status_indicator} {ignored_style}{cn_text}{Colors.RESET if ignored else ''}{padding}   {action_text} {tag_text}"
+                    line = f"{Colors.GRAY}│{Colors.RESET} {status_indicator} {ignored_style}{cn_text}{Colors.RESET if ignored else ''}{padding}   {action_text} {tag_text}"
 
                 # 计算右边距使行宽等于box_width
                 visible_len = get_display_width(strip_ansi(line))
                 right_padding = max(0, box_width - visible_len - 1)
-                lines.append(line + " " * right_padding + f"{Colors.CYAN}│{Colors.RESET}")
+                lines.append(line + " " * right_padding + f"{Colors.GRAY}│{Colors.RESET}")
 
             if len(self.options) > max_file_height and display_start + len(display_options) < len(self.options):
-                indicator = f"{Colors.CYAN}│{Colors.RESET}  {Colors.DIM}↓ 更多...{Colors.RESET}"
-                lines.append(indicator + " " * (box_width - 18) + f"{Colors.CYAN}│{Colors.RESET}")
+                indicator = f"{Colors.GRAY}│{Colors.RESET}  {Colors.DIM}↓ 更多...{Colors.RESET}"
+                lines.append(indicator + " " * (box_width - 18) + f"{Colors.GRAY}│{Colors.RESET}")
 
         # 底边
-        lines.append(f"{Colors.CYAN}╰" + "─" * (box_width - 2) + f"╯{Colors.RESET}")
+        lines.append(f"{Colors.GRAY}╰" + "─" * (box_width - 2) + f"╯{Colors.RESET}")
 
         if self.git.logs:
             lines.append("")
