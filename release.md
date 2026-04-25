@@ -2,7 +2,7 @@
 
 ### 添加:
 
-- 推送成功后自动检测 release.md 并发布 GitHub Release
+- **推送成功后自动检测 release.md 并发布 GitHub Release**
 - 自动配置 Git 身份（首次提交遇到 Author identity unknown 时）
 - get_repo_slug() 方法提取 owner/repo 仓库标识
 
