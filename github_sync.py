@@ -18,10 +18,7 @@ import tempfile
 # 确保退出时恢复终端光标（包括异常退出）
 atexit.register(lambda: print("\033[?25h", end="", flush=True))
 
-# ==========================================
-#              工具函数
-# ==========================================
-
+# ─── 工具函数 ───────
 def get_display_width(text):
     """计算字符串在终端的显示宽度（中文占2，英文占1）"""
     width = 0
@@ -76,10 +73,7 @@ def get_input_with_default(prompt, default_val=""):
                 sys.stdout.write(char)
                 sys.stdout.flush()
 
-# ==========================================
-#              TUI 框架
-# ==========================================
-
+# ─── TUI 框架 ───────
 class Colors:
     RESET = "\033[0m"
     BOLD = "\033[1m"
@@ -118,10 +112,7 @@ def get_key():
         return msvcrt.getch()
     return key
 
-# ==========================================
-#              Git 逻辑
-# ==========================================
-
+# ─── Git 逻辑 ───────
 def run_command(command, cwd=None):
     try:
         result = subprocess.run(
@@ -261,12 +252,9 @@ class GitManager:
         if not lines:
             return
 
-        version_match = re.match(r'^(\d{2}w\d{2}[a-z])$', lines[0].strip())
-        if not version_match:
-            self.log("releases.md 版本号格式无效", "WARN")
+        tag = lines[0].strip().lstrip('#').strip()
+        if not tag:
             return
-
-        tag = version_match.group(1)
         body = "".join(lines[1:]).strip()
 
         repo_slug = self.get_repo_slug()
@@ -280,16 +268,16 @@ class GitManager:
                 f.write(body)
                 tmp_file = f.name
 
-            self.log(f"正在发布 Release {tag}", "INFO")
-            s, m = run_command(f'gh release create {tag} --repo {repo_slug} --notes-file "{tmp_file}"')
+            self.log("正在发布 Release", "INFO")
+            s, m = run_command(f'gh release create {tag} --repo {repo_slug} --target main --notes-file "{tmp_file}"')
 
             if s:
-                self.log(f"Release {tag} 发布成功", "SUCCESS")
+                self.log("发布成功", "SUCCESS")
             elif "already exist" in m.lower():
                 self.log(f"Release {tag} 已存在，正在更新", "INFO")
                 s, m = run_command(f'gh release edit {tag} --repo {repo_slug} --notes-file "{tmp_file}"')
                 if s:
-                    self.log(f"Release {tag} 更新成功", "SUCCESS")
+                    self.log("发布成功", "SUCCESS")
                 else:
                     self.log(f"Release 更新失败: {m}", "ERROR")
             else:
@@ -361,8 +349,15 @@ class GitManager:
             self.log("正在提交", "INFO")
             s, m = run_command(f'git commit -m "{msg}"', cwd=self.cwd)
             if not s:
-                self.log(f"提交失败: {m}", "ERROR")
-                return
+                if "author identity" in m.lower() or "user.name" in m.lower():
+                    username = self.get_github_username() or "User"
+                    run_command(f'git config user.name "{username}"', cwd=self.cwd)
+                    run_command(f'git config user.email "{username}@users.noreply.github.com"', cwd=self.cwd)
+                    self.log(f"已自动配置 Git 身份: {username}", "INFO")
+                    s, m = run_command(f'git commit -m "{msg}"', cwd=self.cwd)
+                if not s:
+                    self.log(f"提交失败: {m}", "ERROR")
+                    return
         else:
             self.log("没有更改需要提交", "INFO")
 
@@ -467,10 +462,7 @@ class GitManager:
         else:
             self.log(f"强制推送失败: {m}", "ERROR")
 
-# ==========================================
-#              TUI 应用程序
-# ==========================================
-
+# ─── TUI 应用程序 ───────
 class App:
     def __init__(self, repo_path):
         self.git = GitManager(repo_path, on_log=self.render)

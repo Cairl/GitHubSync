@@ -1,0 +1,20 @@
+# GitHubSync
+
+Windows 终端 TUI 工具，将本地目录同步到 GitHub 仓库。
+
+## 项目结构
+
+- `github_sync.py` — 单文件应用，包含 TUI 框架、Git 操作逻辑、文件管理
+- `tests/` — 单元测试
+
+## 核心流程
+
+1. 启动时自动执行 `sync()`：扫描文件 → 暂存 → 提交 → 推送
+2. 推送成功后自动检测 `releases.md`，若存在则发布 GitHub Release
+3. TUI 界面支持文件列表浏览、删除/推送操作、60 秒倒计时自动退出
+
+## 关键设计
+
+- 基于 `gh` CLI 操作 GitHub（检测仓库、发布 Release）
+- Release 发布失败不阻塞同步主流程
+- 首次提交遇到 `Author identity unknown` 时自动配置 Git 身份
