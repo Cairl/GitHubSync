@@ -238,7 +238,7 @@ class GitManager:
         return None
 
     def publish_release(self):
-        releases_path = os.path.join(self.cwd, "releases.md")
+        releases_path = os.path.join(self.cwd, "release.md")
         if not os.path.exists(releases_path):
             return
 
@@ -246,7 +246,7 @@ class GitManager:
             with open(releases_path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
         except OSError as e:
-            self.log(f"读取 releases.md 失败: {e}", "ERROR")
+            self.log(f"读取 release.md 失败: {e}", "ERROR")
             return
 
         if not lines:
@@ -274,7 +274,7 @@ class GitManager:
             if s:
                 self.log("发布成功", "SUCCESS")
             elif "already exist" in m.lower():
-                self.log(f"Release {tag} 已存在，正在更新", "INFO")
+                self.log("正在更新 Release", "INFO")
                 s, m = run_command(f'gh release edit {tag} --repo {repo_slug} --notes-file "{tmp_file}"')
                 if s:
                     self.log("发布成功", "SUCCESS")

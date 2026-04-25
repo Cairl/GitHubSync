@@ -10,7 +10,7 @@ Windows 终端 TUI 工具，将本地目录同步到 GitHub 仓库。
 ## 核心流程
 
 1. 启动时自动执行 `sync()`：扫描文件 → 暂存 → 提交 → 推送
-2. 推送成功后自动检测 `releases.md`，若存在则发布 GitHub Release
+2. 推送成功后自动检测 `release.md`，若存在则发布 GitHub Release
 3. TUI 界面支持文件列表浏览、删除/推送操作、60 秒倒计时自动退出
 
 ## 关键设计
