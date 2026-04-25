@@ -368,7 +368,7 @@ class GitManager:
                 return
         
         run_command("git branch -M main", cwd=self.cwd)
-        self.log("正在推送到 GitHub", "INFO")
+        self.log("正在推送 GitHub", "INFO")
         s, m = run_command("git push -u origin main", cwd=self.cwd)
         
         if s:
@@ -577,7 +577,7 @@ class App:
         
         self.refresh_file_list() # 同步 UI 状态
         self.git.updated_items[item_name] = 'D'
-        self.git.log(f"已删除: {item_name}", "SUCCESS")
+        self.git.log(f"删除成功: {item_name}", "SUCCESS")
     
     def push_to_github(self, item_name):
         """从忽略列表移除并推送到 GitHub"""
