@@ -13,6 +13,7 @@ import unicodedata
 import re
 import atexit
 from datetime import datetime
+import tempfile
 
 # 确保退出时恢复终端光标（包括异常退出）
 atexit.register(lambda: print("\033[?25h", end="", flush=True))
@@ -237,6 +238,71 @@ class GitManager:
         
         return None
 
+    def get_repo_slug(self):
+        s, m = run_command("git remote -v", cwd=self.cwd)
+        if s and "github.com" in m:
+            match = re.search(r"github\.com[:/]([^/ \n\r]+)/([^/ \n\r]+?)(?:\.git)?(?:\s|$)", m)
+            if match:
+                return f"{match.group(1)}/{match.group(2)}"
+        return None
+
+    def publish_release(self):
+        releases_path = os.path.join(self.cwd, "releases.md")
+        if not os.path.exists(releases_path):
+            return
+
+        try:
+            with open(releases_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+        except OSError as e:
+            self.log(f"读取 releases.md 失败: {e}", "ERROR")
+            return
+
+        if not lines:
+            return
+
+        version_match = re.match(r'^(\d{2}w\d{2}[a-z])$', lines[0].strip())
+        if not version_match:
+            self.log("releases.md 版本号格式无效", "WARN")
+            return
+
+        tag = version_match.group(1)
+        body = "".join(lines[1:]).strip()
+
+        repo_slug = self.get_repo_slug()
+        if not repo_slug:
+            self.log("无法获取仓库信息，跳过 Release 发布", "WARN")
+            return
+
+        tmp_file = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as f:
+                f.write(body)
+                tmp_file = f.name
+
+            self.log(f"正在发布 Release {tag}", "INFO")
+            s, m = run_command(f'gh release create {tag} --repo {repo_slug} --notes-file "{tmp_file}"')
+
+            if s:
+                self.log(f"Release {tag} 发布成功", "SUCCESS")
+            elif "already exist" in m.lower():
+                self.log(f"Release {tag} 已存在，正在更新", "INFO")
+                s, m = run_command(f'gh release edit {tag} --repo {repo_slug} --notes-file "{tmp_file}"')
+                if s:
+                    self.log(f"Release {tag} 更新成功", "SUCCESS")
+                else:
+                    self.log(f"Release 更新失败: {m}", "ERROR")
+            else:
+                self.log(f"Release 发布失败: {m}", "ERROR")
+        except Exception as e:
+            self.log(f"Release 发布异常: {e}", "ERROR")
+        finally:
+            if tmp_file and os.path.exists(tmp_file):
+                try:
+                    os.remove(tmp_file)
+                except OSError:
+                    pass
+
     def configure_remote(self):
         username = self.get_github_username()
         repo_name = os.path.basename(self.cwd)
@@ -312,6 +378,7 @@ class GitManager:
         
         if s:
             self.log("同步成功", "SUCCESS")
+            self.publish_release()
         else:
             if "repository not found" in m.lower() or "does not exist" in m.lower() or "404" in m:
                 if self.create_github_repo():
@@ -319,6 +386,7 @@ class GitManager:
                     s, m = run_command("git push -u origin main", cwd=self.cwd)
                     if s:
                         self.log("同步成功", "SUCCESS")
+                        self.publish_release()
                         return
             
             if "rejected" in m or "fetch first" in m:
@@ -329,6 +397,7 @@ class GitManager:
                     s_push, m_push = run_command("git push -u origin main", cwd=self.cwd)
                     if s_push:
                         self.log("同步成功 (已合并)", "SUCCESS")
+                        self.publish_release()
                         return
                     else:
                         self.log(f"合并后推送失败: {m_push}", "ERROR")
@@ -392,8 +461,11 @@ class GitManager:
 
     def force_push(self):
         s, m = run_command("git push -u origin main --force", cwd=self.cwd)
-        if s: self.log("强制推送成功", "SUCCESS")
-        else: self.log(f"强制推送失败: {m}", "ERROR")
+        if s:
+            self.log("强制推送成功", "SUCCESS")
+            self.publish_release()
+        else:
+            self.log(f"强制推送失败: {m}", "ERROR")
 
 # ==========================================
 #              TUI 应用程序
