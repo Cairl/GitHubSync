@@ -113,99 +113,6 @@ def get_key():
     return key
 
 # ─── Git 逻辑 ───────
-def resolve_repo_path_from_shortcut():
-    """通过 WMI 查询当前进程的启动命令行，提取 .lnk 路径并解析其所在目录。"""
-    pid = os.getpid()
-    ps_script = (
-        f'Get-WmiObject Win32_Process -Filter "ProcessId={pid}" | '
-        f'Select-Object -ExpandProperty CommandLine'
-    )
-    s, cmd_line = run_command(f'powershell -NoProfile -Command "{ps_script}"')
-    if not s or not cmd_line:
-        return _resolve_repo_path_from_shortcut_fallback()
-
-    # 从命令行中提取 .lnk 路径
-    lnk_path = None
-    parts = cmd_line.split('"')
-    for part in parts:
-        part = part.strip()
-        if part.lower().endswith('.lnk') and os.path.exists(part):
-            lnk_path = part
-            break
-
-    if not lnk_path:
-        return _resolve_repo_path_from_shortcut_fallback()
-
-    # 解析快捷方式的目标路径
-    ps_script = (
-        f'$shell = New-Object -ComObject WScript.Shell; '
-        f'$lnk = $shell.CreateShortcut("{lnk_path}"); '
-        f'"$($lnk.TargetPath)|$($lnk.Arguments)"'
-    )
-    s, m = run_command(f'powershell -NoProfile -Command "{ps_script}"')
-    if not s or not m.strip():
-        return _resolve_repo_path_from_shortcut_fallback()
-
-    parts = m.strip().split('|')
-    if len(parts) < 1:
-        return _resolve_repo_path_from_shortcut_fallback()
-
-    target_path = parts[0]
-    arguments = parts[1] if len(parts) > 1 else ""
-
-    self_path = os.path.normcase(os.path.abspath(sys.argv[0]))
-    self_basename = os.path.basename(sys.argv[0])
-
-    is_self = False
-    if os.path.normcase(target_path) == self_path:
-        is_self = True
-    elif (os.path.basename(target_path).lower() in ('python.exe', 'pythonw.exe')
-          and self_basename in arguments):
-        is_self = True
-
-    if is_self:
-        return os.path.dirname(lnk_path)
-
-    return _resolve_repo_path_from_shortcut_fallback()
-
-
-def _resolve_repo_path_from_shortcut_fallback():
-    """备选方案：扫描 os.getcwd() 中指向自身的 .lnk。"""
-    cwd = os.getcwd()
-    lnk_files = [f for f in os.listdir(cwd) if f.lower().endswith('.lnk')]
-    if not lnk_files:
-        return None
-
-    ps_script = (
-        '$shell = New-Object -ComObject WScript.Shell; '
-        f'Get-ChildItem -Path \'{cwd}\' -Filter *.lnk | ForEach-Object {{ '
-        '$lnk = $shell.CreateShortcut($_.FullName); '
-        '"$($_.Name)|$($lnk.TargetPath)|$($lnk.Arguments)" '
-        '}}'
-    )
-    s, m = run_command(f'powershell -NoProfile -Command "{ps_script}"')
-    if not s or not m.strip():
-        return None
-
-    self_path = os.path.normcase(os.path.abspath(sys.argv[0]))
-    self_basename = os.path.basename(sys.argv[0])
-
-    for line in m.strip().splitlines():
-        parts = line.strip().split('|')
-        if len(parts) < 2:
-            continue
-        target_path = parts[1]
-        arguments = parts[2] if len(parts) > 2 else ""
-
-        if os.path.normcase(target_path) == self_path:
-            return cwd
-        if (os.path.basename(target_path).lower() in ('python.exe', 'pythonw.exe')
-                and self_basename in arguments):
-            return cwd
-
-    return None
-
-
 def run_command(command, cwd=None):
     try:
         result = subprocess.run(
@@ -284,59 +191,6 @@ class GitManager:
             self.log("已创建默认 .gitignore", "SUCCESS")
         except Exception as e:
             self.log(f"创建失败: {e}", "ERROR")
-
-    def ignore_self_shortcuts(self):
-        lnk_files = [f for f in os.listdir(self.cwd) if f.lower().endswith('.lnk')]
-        if not lnk_files:
-            return
-
-        ps_script = (
-            '$shell = New-Object -ComObject WScript.Shell; '
-            f'Get-ChildItem -Path \'{self.cwd}\' -Filter *.lnk | ForEach-Object {{ '
-            '$lnk = $shell.CreateShortcut($_.FullName); '
-            '"$($_.Name)|$($lnk.TargetPath)|$($lnk.Arguments)" '
-            '}}'
-        )
-        s, m = run_command(f'powershell -NoProfile -Command "{ps_script}"')
-        if not s or not m.strip():
-            return
-
-        self_path = os.path.normcase(os.path.abspath(sys.argv[0]))
-        self_basename = os.path.basename(sys.argv[0])
-        shortcuts_to_ignore = []
-
-        for line in m.strip().splitlines():
-            parts = line.strip().split('|')
-            if len(parts) < 2:
-                continue
-            lnk_name, target_path = parts[0], parts[1]
-            arguments = parts[2] if len(parts) > 2 else ""
-
-            if os.path.normcase(target_path) == self_path:
-                shortcuts_to_ignore.append(lnk_name)
-            elif (os.path.basename(target_path).lower() in ('python.exe', 'pythonw.exe')
-                  and self_basename in arguments):
-                shortcuts_to_ignore.append(lnk_name)
-
-        if not shortcuts_to_ignore:
-            return
-
-        gitignore_path = os.path.join(self.cwd, ".gitignore")
-        try:
-            existing = ""
-            if os.path.exists(gitignore_path):
-                with open(gitignore_path, "r", encoding="utf-8") as f:
-                    existing = f.read()
-
-            existing_lines = {line.strip() for line in existing.splitlines() if line.strip()}
-            new_entries = [name for name in shortcuts_to_ignore if name not in existing_lines]
-            if new_entries:
-                with open(gitignore_path, "a", encoding="utf-8") as f:
-                    for entry in new_entries:
-                        f.write(f"\n{entry}")
-                self.log(f"已自动忽略快捷方式: {', '.join(new_entries)}", "INFO")
-        except OSError as e:
-            self.log(f"忽略快捷方式失败: {e}", "ERROR")
 
     def get_github_username(self):
         """尝试获取当前登录的 GitHub 用户名"""
@@ -460,8 +314,7 @@ class GitManager:
 
     def sync(self):
         self.create_ignore()
-        self.ignore_self_shortcuts()
-
+        
         status = self.get_status()
         if not status["initialized"]:
             self.init_repo()
@@ -1096,8 +949,7 @@ if __name__ == "__main__":
                 print(f"错误: '{potential_path}' 不是一个有效的文件夹。")
                 sys.exit(1)
         else:
-            shortcut_cwd = resolve_repo_path_from_shortcut()
-            repo_path = shortcut_cwd if shortcut_cwd else os.getcwd()
+            repo_path = os.getcwd()
 
         app = App(repo_path)
         app.run()
@@ -1106,4 +958,4 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n发生错误: {e}")
     finally:
-        print("\033[?25h", end="")
+        print("\033[?25h", end="") # 恢复光标
