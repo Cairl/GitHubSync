@@ -18,3 +18,4 @@ Windows 终端 TUI 工具，将本地目录同步到 GitHub 仓库。
 - 基于 `gh` CLI 操作 GitHub（检测仓库、发布 Release）
 - Release 发布失败不阻塞同步主流程
 - 首次提交遇到 `Author identity unknown` 时自动配置 Git 身份
+- 无命令行参数时默认同步当前工作目录，无需 GUI 依赖
