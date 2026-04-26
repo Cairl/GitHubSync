@@ -192,6 +192,59 @@ class GitManager:
         except Exception as e:
             self.log(f"创建失败: {e}", "ERROR")
 
+    def ignore_self_shortcuts(self):
+        lnk_files = [f for f in os.listdir(self.cwd) if f.lower().endswith('.lnk')]
+        if not lnk_files:
+            return
+
+        ps_script = (
+            '$shell = New-Object -ComObject WScript.Shell; '
+            f'Get-ChildItem -Path \'{self.cwd}\' -Filter *.lnk | ForEach-Object {{ '
+            '$lnk = $shell.CreateShortcut($_.FullName); '
+            '"$($_.Name)|$($lnk.TargetPath)|$($lnk.Arguments)" '
+            '}}'
+        )
+        s, m = run_command(f'powershell -NoProfile -Command "{ps_script}"')
+        if not s or not m.strip():
+            return
+
+        self_path = os.path.normcase(os.path.abspath(sys.argv[0]))
+        self_basename = os.path.basename(sys.argv[0])
+        shortcuts_to_ignore = []
+
+        for line in m.strip().splitlines():
+            parts = line.strip().split('|')
+            if len(parts) < 2:
+                continue
+            lnk_name, target_path = parts[0], parts[1]
+            arguments = parts[2] if len(parts) > 2 else ""
+
+            if os.path.normcase(target_path) == self_path:
+                shortcuts_to_ignore.append(lnk_name)
+            elif (os.path.basename(target_path).lower() in ('python.exe', 'pythonw.exe')
+                  and self_basename in arguments):
+                shortcuts_to_ignore.append(lnk_name)
+
+        if not shortcuts_to_ignore:
+            return
+
+        gitignore_path = os.path.join(self.cwd, ".gitignore")
+        try:
+            existing = ""
+            if os.path.exists(gitignore_path):
+                with open(gitignore_path, "r", encoding="utf-8") as f:
+                    existing = f.read()
+
+            existing_lines = {line.strip() for line in existing.splitlines() if line.strip()}
+            new_entries = [name for name in shortcuts_to_ignore if name not in existing_lines]
+            if new_entries:
+                with open(gitignore_path, "a", encoding="utf-8") as f:
+                    for entry in new_entries:
+                        f.write(f"\n{entry}")
+                self.log(f"已自动忽略快捷方式: {', '.join(new_entries)}", "INFO")
+        except OSError as e:
+            self.log(f"忽略快捷方式失败: {e}", "ERROR")
+
     def get_github_username(self):
         """尝试获取当前登录的 GitHub 用户名"""
         # 1. 尝试使用 gh CLI
@@ -314,7 +367,8 @@ class GitManager:
 
     def sync(self):
         self.create_ignore()
-        
+        self.ignore_self_shortcuts()
+
         status = self.get_status()
         if not status["initialized"]:
             self.init_repo()
@@ -353,7 +407,7 @@ class GitManager:
                     username = self.get_github_username() or "User"
                     run_command(f'git config user.name "{username}"', cwd=self.cwd)
                     run_command(f'git config user.email "{username}@users.noreply.github.com"', cwd=self.cwd)
-                    self.log(f"已自动配置 Git 身份: {username}", "INFO")
+                    self.log(f"自动配置 Git 身份: {username}", "INFO")
                     s, m = run_command(f'git commit -m "{msg}"', cwd=self.cwd)
                 if not s:
                     self.log(f"提交失败: {m}", "ERROR")
@@ -941,10 +995,6 @@ class App:
 
 if __name__ == "__main__":
     try:
-        import tkinter as tk
-        from tkinter import filedialog
-
-        repo_path = ""
         if len(sys.argv) > 1:
             potential_path = sys.argv[1]
             if os.path.isdir(potential_path):
@@ -953,14 +1003,7 @@ if __name__ == "__main__":
                 print(f"错误: '{potential_path}' 不是一个有效的文件夹。")
                 sys.exit(1)
         else:
-            root = tk.Tk()
-            root.withdraw()
-            repo_path = filedialog.askdirectory(title="选择 Git 仓库文件夹")
-            root.destroy()
-
-        if not repo_path:
-            print("未选择文件夹，程序退出。")
-            sys.exit(0)
+            repo_path = os.getcwd()
 
         app = App(repo_path)
         app.run()
@@ -969,4 +1012,4 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n发生错误: {e}")
     finally:
-        print("\033[?25h", end="") # 恢复光标
+        print("\033[?25h", end="")
