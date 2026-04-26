@@ -113,6 +113,41 @@ def get_key():
     return key
 
 # ─── Git 逻辑 ───────
+def resolve_repo_path_from_shortcut(cwd):
+    lnk_files = [f for f in os.listdir(cwd) if f.lower().endswith('.lnk')]
+    if not lnk_files:
+        return None
+
+    ps_script = (
+        '$shell = New-Object -ComObject WScript.Shell; '
+        f'Get-ChildItem -Path \'{cwd}\' -Filter *.lnk | ForEach-Object {{ '
+        '$lnk = $shell.CreateShortcut($_.FullName); '
+        '"$($_.Name)|$($lnk.TargetPath)|$($lnk.Arguments)" '
+        '}}'
+    )
+    s, m = run_command(f'powershell -NoProfile -Command "{ps_script}"')
+    if not s or not m.strip():
+        return None
+
+    self_path = os.path.normcase(os.path.abspath(sys.argv[0]))
+    self_basename = os.path.basename(sys.argv[0])
+
+    for line in m.strip().splitlines():
+        parts = line.strip().split('|')
+        if len(parts) < 2:
+            continue
+        target_path = parts[1]
+        arguments = parts[2] if len(parts) > 2 else ""
+
+        if os.path.normcase(target_path) == self_path:
+            return cwd
+        if (os.path.basename(target_path).lower() in ('python.exe', 'pythonw.exe')
+                and self_basename in arguments):
+            return cwd
+
+    return None
+
+
 def run_command(command, cwd=None):
     try:
         result = subprocess.run(
@@ -1003,7 +1038,9 @@ if __name__ == "__main__":
                 print(f"错误: '{potential_path}' 不是一个有效的文件夹。")
                 sys.exit(1)
         else:
-            repo_path = os.getcwd()
+            cwd = os.getcwd()
+            shortcut_cwd = resolve_repo_path_from_shortcut(cwd)
+            repo_path = shortcut_cwd if shortcut_cwd else cwd
 
         app = App(repo_path)
         app.run()
