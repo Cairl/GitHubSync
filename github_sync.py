@@ -113,7 +113,65 @@ def get_key():
     return key
 
 # ─── Git 逻辑 ───────
-def resolve_repo_path_from_shortcut(cwd):
+def resolve_repo_path_from_shortcut():
+    """通过 WMI 查询当前进程的启动命令行，提取 .lnk 路径并解析其所在目录。"""
+    pid = os.getpid()
+    ps_script = (
+        f'Get-WmiObject Win32_Process -Filter "ProcessId={pid}" | '
+        f'Select-Object -ExpandProperty CommandLine'
+    )
+    s, cmd_line = run_command(f'powershell -NoProfile -Command "{ps_script}"')
+    if not s or not cmd_line:
+        return _resolve_repo_path_from_shortcut_fallback()
+
+    # 从命令行中提取 .lnk 路径
+    lnk_path = None
+    parts = cmd_line.split('"')
+    for part in parts:
+        part = part.strip()
+        if part.lower().endswith('.lnk') and os.path.exists(part):
+            lnk_path = part
+            break
+
+    if not lnk_path:
+        return _resolve_repo_path_from_shortcut_fallback()
+
+    # 解析快捷方式的目标路径
+    ps_script = (
+        f'$shell = New-Object -ComObject WScript.Shell; '
+        f'$lnk = $shell.CreateShortcut("{lnk_path}"); '
+        f'"$($lnk.TargetPath)|$($lnk.Arguments)"'
+    )
+    s, m = run_command(f'powershell -NoProfile -Command "{ps_script}"')
+    if not s or not m.strip():
+        return _resolve_repo_path_from_shortcut_fallback()
+
+    parts = m.strip().split('|')
+    if len(parts) < 1:
+        return _resolve_repo_path_from_shortcut_fallback()
+
+    target_path = parts[0]
+    arguments = parts[1] if len(parts) > 1 else ""
+
+    self_path = os.path.normcase(os.path.abspath(sys.argv[0]))
+    self_basename = os.path.basename(sys.argv[0])
+
+    is_self = False
+    if os.path.normcase(target_path) == self_path:
+        is_self = True
+    elif (os.path.basename(target_path).lower() in ('python.exe', 'pythonw.exe')
+          and self_basename in arguments):
+        is_self = True
+
+    if is_self:
+        return os.path.dirname(lnk_path)
+
+    return _resolve_repo_path_from_shortcut_fallback()
+
+
+def _resolve_repo_path_from_shortcut_fallback():
+    """备选方案：扫描 os.getcwd() 中指向自身的 .lnk。"""
+    cwd = os.getcwd()
     lnk_files = [f for f in os.listdir(cwd) if f.lower().endswith('.lnk')]
     if not lnk_files:
         return None
@@ -1038,9 +1096,8 @@ if __name__ == "__main__":
                 print(f"错误: '{potential_path}' 不是一个有效的文件夹。")
                 sys.exit(1)
         else:
-            cwd = os.getcwd()
-            shortcut_cwd = resolve_repo_path_from_shortcut(cwd)
-            repo_path = shortcut_cwd if shortcut_cwd else cwd
+            shortcut_cwd = resolve_repo_path_from_shortcut()
+            repo_path = shortcut_cwd if shortcut_cwd else os.getcwd()
 
         app = App(repo_path)
         app.run()
