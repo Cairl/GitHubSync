@@ -332,7 +332,7 @@ class GitManager:
             self.init_repo()
             status = self.get_status()
         
-        self.log("正在扫描文件", "INFO")
+        self.log("正在扫描", "INFO")
         s, m = run_command("git add .", cwd=self.cwd)
         if not s:
             self.log(f"文件暂存失败: {m}", "ERROR")
