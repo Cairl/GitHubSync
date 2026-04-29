@@ -27,3 +27,4 @@ Windows 终端 TUI 工具，将本地目录同步到 GitHub 仓库。
 
 - 新增 `run_sync.bat` 启动器脚本，支持将 bat 所在目录自动作为同步目标
 - 默认 `.gitignore` 新增 `run_sync.bat`，避免启动器被意外提交到用户仓库
+- 移除 `run_sync.bat` 末尾的 `cmd /k`，脚本执行完毕后自动关闭窗口
