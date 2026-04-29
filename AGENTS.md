@@ -20,6 +20,7 @@ Windows 终端 TUI 工具，将本地目录同步到 GitHub 仓库。
 - Release 发布失败不阻塞同步主流程
 - 首次提交遇到 `Author identity unknown` 时自动配置 Git 身份
 - 无命令行参数时默认同步当前工作目录，无需 GUI 依赖
+- TUI 状态面板显示最新 Release 版本号，支持点击跳转对应 Release 页面
 
 ## 变更记录
 
@@ -28,3 +29,4 @@ Windows 终端 TUI 工具，将本地目录同步到 GitHub 仓库。
 - 新增 `run_sync.bat` 启动器脚本，支持将 bat 所在目录自动作为同步目标
 - 默认 `.gitignore` 新增 `run_sync.bat`，避免启动器被意外提交到用户仓库
 - 移除 `run_sync.bat` 末尾的 `cmd /k`，脚本执行完毕后自动关闭窗口
+- TUI 状态面板新增"版本"信息，显示 GitHub Releases 最新版本号（蓝色，支持 OSC8 点击跳转）
