@@ -184,7 +184,7 @@ class GitManager:
         if os.path.exists(gitignore_path):
             return
         
-        content = "__pycache__/\n*.pyc\n.env\n.DS_Store\n.vscode/\n.idea/\ndist/\nbuild/\n*.spec\nvenv/\n"
+        content = "__pycache__/\n*.pyc\n.env\n.DS_Store\n.vscode/\n.idea/\ndist/\nbuild/\n*.spec\nvenv/\nrun_sync.bat\n"
         try:
             with open(gitignore_path, "w", encoding="utf-8") as f:
                 f.write(content)
