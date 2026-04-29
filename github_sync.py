@@ -757,7 +757,7 @@ class App:
                 version_line = f"版本: {Colors.DIM}无{Colors.RESET}"
             status_lines = [
                 f"项目: {Colors.WHITE}{os.path.basename(self.git.cwd)}{Colors.RESET}",
-                f"分支: {Colors.DIM}{status['branch']}{Colors.RESET}",
+                f"分支: {Colors.GRAY}{status['branch']}{Colors.RESET}",
                 f"远程: {remote_clickable}",
                 version_line
             ]
