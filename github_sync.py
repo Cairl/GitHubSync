@@ -237,6 +237,18 @@ class GitManager:
                 return f"{match.group(1)}/{match.group(2)}"
         return None
 
+    def get_latest_release(self):
+        """获取 GitHub 仓库最新的 release 版本号"""
+        repo_slug = self.get_repo_slug()
+        if not repo_slug:
+            return None
+        s, m = run_command(f"gh release list --repo {repo_slug} --limit 1")
+        if s and m:
+            parts = m.split()
+            if parts:
+                return parts[0]
+        return None
+
     def publish_release(self):
         releases_path = os.path.join(self.cwd, "release.md")
         if not os.path.exists(releases_path):
@@ -735,10 +747,19 @@ class App:
                 osc_url = f"https://{remote_display}"
             # 远程地址可点击（OSC 8 超链接格式）
             remote_clickable = f"\033]8;;{osc_url}\033\\{Colors.YELLOW}{remote_display}{Colors.RESET}\033]8;;\033\\"
+            # 获取最新 release 版本
+            latest_release = self.git.get_latest_release()
+            if latest_release:
+                release_url = f"{osc_url}/releases/tag/{latest_release}"
+                release_clickable = f"\033]8;;{release_url}\033\\{Colors.YELLOW}{latest_release}{Colors.RESET}\033]8;;\033\\"
+                version_line = f"版本: {release_clickable}"
+            else:
+                version_line = f"版本: {Colors.DIM}无{Colors.RESET}"
             status_lines = [
                 f"项目: {Colors.WHITE}{os.path.basename(self.git.cwd)}{Colors.RESET}",
                 f"分支: {Colors.GREEN}{status['branch']}{Colors.RESET}",
-                f"远程: {remote_clickable}"
+                f"远程: {remote_clickable}",
+                version_line
             ]
         else:
             status_lines = [
