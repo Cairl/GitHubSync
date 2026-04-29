@@ -751,7 +751,7 @@ class App:
             latest_release = self.git.get_latest_release()
             if latest_release:
                 release_url = f"{osc_url}/releases/tag/{latest_release}"
-                release_clickable = f"\033]8;;{release_url}\033\\{Colors.CYAN}{latest_release}{Colors.RESET}\033]8;;\033\\"
+                release_clickable = f"\033]8;;{release_url}\033\\{Colors.BLUE}{latest_release}{Colors.RESET}\033]8;;\033\\"
                 version_line = f"版本: {release_clickable}"
             else:
                 version_line = f"版本: {Colors.DIM}无{Colors.RESET}"
