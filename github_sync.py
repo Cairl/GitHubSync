@@ -489,6 +489,23 @@ class App:
         self.deadline = time.time() + 60
         self.operation_in_progress = False  # 操作进行中标志
         self.cooldown_until = 0  # 冷却时间截止时间
+        self._cached_status = None
+        self._cached_release = None
+
+    def _refresh_caches(self):
+        """刷新缓存的 git status 和 release 信息"""
+        self._cached_status = self.git.get_status()
+        self._cached_release = self.git.get_latest_release()
+
+    def _get_status(self):
+        if self._cached_status is None:
+            self._refresh_caches()
+        return self._cached_status
+
+    def _get_release(self):
+        if self._cached_release is None:
+            self._refresh_caches()
+        return self._cached_release
 
     def refresh_file_list(self):
         """刷新当前目录的文件列表到菜单"""
@@ -553,9 +570,9 @@ class App:
             else:
                 self.remove_from_github(item_name)
         finally:
+            self._refresh_caches()
             self.operation_in_progress = False
-            # 操作完成后添加冷却时间，忽略这段时间内的按键
-            self.cooldown_until = time.time() + 1.0  # 1秒冷却时间
+            self.cooldown_until = time.time() + 1.0
     
     def remove_from_github(self, item_name):
         """从 GitHub 仓库删除文件并添加到忽略"""
@@ -721,7 +738,7 @@ class App:
             term_height = 24
 
         lines = []
-        status = self.git.get_status()
+        status = self._get_status()
         lines.append("") # 顶部留白
 
         # 状态面板 (圆角，无标题) - 约 5 行
@@ -748,7 +765,7 @@ class App:
             # 远程地址可点击（OSC 8 超链接格式）
             remote_clickable = f"\033]8;;{osc_url}\033\\{Colors.YELLOW}{remote_display}{Colors.RESET}\033]8;;\033\\"
             # 获取最新 release 版本
-            latest_release = self.git.get_latest_release()
+            latest_release = self._get_release()
             if latest_release:
                 release_url = f"{osc_url}/releases/tag/{latest_release}"
                 release_clickable = f"\033]8;;{release_url}\033\\{Colors.GREEN}{latest_release}{Colors.RESET}\033]8;;\033\\"
@@ -909,6 +926,7 @@ class App:
             self.render()
             self.git.sync()
             self.first_sync_done = True
+            self._refresh_caches()
             self.operation_in_progress = False
             self.cooldown_until = time.time() + 1.0  # 同步后冷却
             self.refresh_file_list() # 同步后刷新文件列表
@@ -923,7 +941,7 @@ class App:
                 if self.operation_in_progress or time.time() < self.cooldown_until:
                     while msvcrt.kbhit():
                         msvcrt.getch()
-                    time.sleep(0.05)
+                    time.sleep(0.01)
                     continue
 
                 key = get_key()
@@ -956,7 +974,7 @@ class App:
                 self.timeout_seconds = max(0, round(remaining))
                 if remaining < 0:
                     self.running = False
-                time.sleep(0.05)
+                time.sleep(0.01)
 
         print("\n已退出。")
 
