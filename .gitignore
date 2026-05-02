@@ -25,3 +25,5 @@ tests
 .pytest_cache
 
 docs
+
+run_sync.bat
