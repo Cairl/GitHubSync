@@ -24,6 +24,24 @@ Windows 终端 TUI 工具，将本地目录同步到 GitHub 仓库。
 
 ## 变更记录
 
+### 26w18c
+
+#### 修改范围
+- `github_sync.py` — `App` 类新增缓存机制
+
+#### 原因与背景
+- `get_render_lines()` 每次渲染调用 `git.get_status()` 和 `git.get_latest_release()`，后者通过 `gh release list` 发起网络请求，导致渲染路径阻塞 200-500ms+，TUI 操作菜单出现明显顿挫感
+
+#### 行为差异
+- 状态和 Release 信息在初始化和操作完成后刷新缓存，渲染时直接读取缓存，不再每帧执行子进程调用
+- 主循环空闲 sleep 从 50ms 降至 10ms，操作响应更及时
+
+#### 系统影响
+- 仅影响 App 类内部，不影响 GitManager 及外部接口
+
+#### 关键问题
+- 缓存一致性：在 `delete_selected()` 和初始同步完成后调用 `_refresh_caches()` 确保缓存与实际状态同步
+
 ### 2026-04-30
 
 - 新增 `run_sync.bat` 启动器脚本，支持将 bat 所在目录自动作为同步目标
