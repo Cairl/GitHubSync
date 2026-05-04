@@ -826,8 +826,8 @@ class App:
 
                 # 添加更多指示器
                 if display_start > 0:
-                    indicator = f"{Colors.GRAY}│{Colors.RESET}  {Colors.DIM}↑ 更多...{Colors.RESET}"
-                    lines.append(indicator + " " * (box_width - 18) + f"{Colors.GRAY}│{Colors.RESET}")
+                    indicator = f"{Colors.GRAY}│{Colors.RESET}    {Colors.DIM}...{Colors.RESET}"
+                    lines.append(indicator + " " * (box_width - 14) + f"{Colors.GRAY}│{Colors.RESET}")
 
             max_cn_width = 0
             for opt in display_options:
@@ -868,8 +868,8 @@ class App:
                 lines.append(line + " " * right_padding + f"{Colors.GRAY}│{Colors.RESET}")
 
             if len(self.options) > max_file_height and display_start + len(display_options) < len(self.options):
-                indicator = f"{Colors.GRAY}│{Colors.RESET}  {Colors.DIM}↓ 更多...{Colors.RESET}"
-                lines.append(indicator + " " * (box_width - 18) + f"{Colors.GRAY}│{Colors.RESET}")
+                indicator = f"{Colors.GRAY}│{Colors.RESET}    {Colors.DIM}...{Colors.RESET}"
+                lines.append(indicator + " " * (box_width - 14) + f"{Colors.GRAY}│{Colors.RESET}")
 
         # 底边
         lines.append(f"{Colors.GRAY}╰" + "─" * (box_width - 2) + f"╯{Colors.RESET}")
