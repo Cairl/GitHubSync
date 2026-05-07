@@ -491,11 +491,13 @@ class App:
         self.cooldown_until = 0  # 冷却时间截止时间
         self._cached_status = None
         self._cached_release = None
+        self._cache_miss_sentinel = object()  # 用于区分"未缓存"和"缓存值为None"
 
     def _refresh_caches(self):
         """刷新缓存的 git status 和 release 信息"""
         self._cached_status = self.git.get_status()
-        self._cached_release = self.git.get_latest_release()
+        release = self.git.get_latest_release()
+        self._cached_release = release if release is not None else self._cache_miss_sentinel
 
     def _get_status(self):
         if self._cached_status is None:
@@ -505,6 +507,8 @@ class App:
     def _get_release(self):
         if self._cached_release is None:
             self._refresh_caches()
+        if self._cached_release is self._cache_miss_sentinel:
+            return None
         return self._cached_release
 
     def refresh_file_list(self):
@@ -534,16 +538,40 @@ class App:
                             ignored_items.add(line.rstrip("/"))
             
             for d in dirs:
+                w = get_display_width(d)
+                ignored = d in ignored_items
+                action_text = "推送" if ignored else "删除"
+                tag_text = "(已忽略)" if ignored else ""
+                # 预计算固定部分宽度（不含 name 和 padding，因为 padding 取决于 max_cn_width）
+                # 格式: "│ {status} {name}{padding}   {action} {tag}"
+                # fixed_width = 1(│) + 1(空格) + 3(status) + 1(空格) + 3(action前空格) + action宽 + 1(action后空格) + tag宽
+                # 总宽 = fixed_width + max_cn_width
+                tag_w = get_display_width(tag_text)
+                fixed_width = 1 + 1 + 3 + 1 + 3 + get_display_width(action_text) + 1 + tag_w
                 self.options.append({
-                    "name": d, 
+                    "name": d,
                     "action": lambda n=d: self.confirm_delete(n),
-                    "ignored": d in ignored_items
+                    "ignored": ignored,
+                    "width": w,
+                    "action_text": action_text,
+                    "tag_text": tag_text,
+                    "fixed_width": fixed_width,
                 })
             for f in files:
+                w = get_display_width(f)
+                ignored = f in ignored_items
+                action_text = "推送" if ignored else "删除"
+                tag_text = "(已忽略)" if ignored else ""
+                tag_w = get_display_width(tag_text)
+                fixed_width = 1 + 1 + 3 + 1 + 3 + get_display_width(action_text) + 1 + tag_w
                 self.options.append({
-                    "name": f, 
+                    "name": f,
                     "action": lambda n=f: self.confirm_delete(n),
-                    "ignored": f in ignored_items
+                    "ignored": ignored,
+                    "width": w,
+                    "action_text": action_text,
+                    "tag_text": tag_text,
+                    "fixed_width": fixed_width,
                 })
                 
             if not self.options:
@@ -824,52 +852,62 @@ class App:
                     display_start = max(0, end - max_file_height)
                 display_options = self.options[display_start:end]
 
-                # 添加更多指示器
+                # 添加上方滚动指示器
                 if display_start > 0:
                     indicator = f"{Colors.GRAY}│{Colors.RESET}    {Colors.DIM}...{Colors.RESET}"
-                    lines.append(indicator + " " * (box_width - 14) + f"{Colors.GRAY}│{Colors.RESET}")
+                    # indicator 显示宽度 = 1(│) + 4(空格) + 3(...) = 8
+                    lines.append(indicator + " " * (box_width - 8 - 1) + f"{Colors.GRAY}│{Colors.RESET}")
 
             max_cn_width = 0
             for opt in display_options:
-                max_cn_width = max(max_cn_width, get_display_width(opt['name']))
+                max_cn_width = max(max_cn_width, opt['width'])
 
             for i, option in enumerate(display_options):
                 actual_index = display_start + i
                 is_selected = (actual_index == self.selected_index)
 
                 cn_text = option['name']
-                ignored = option.get('ignored', False)
-                action_text = "推送" if ignored else "删除"
+                ignored = option['ignored']
+                action_text = option['action_text']
+                tag_text = option['tag_text']
 
                 status_char = self.git.updated_items.get(cn_text)
-                if status_char == 'A': status_indicator = f"[{Colors.GREEN}+{Colors.RESET}]"
-                elif status_char == 'D': status_indicator = f"[{Colors.RED}-{Colors.RESET}]"
-                else: status_indicator = "   "
+                if status_char == 'A':
+                    status_indicator = f"[{Colors.GREEN}+{Colors.RESET}]"
+                elif status_char == 'D':
+                    status_indicator = f"[{Colors.RED}-{Colors.RESET}]"
+                else:
+                    status_indicator = "   "
 
-                padding = " " * (max_cn_width - get_display_width(cn_text))
-                tag_text = f"{Colors.DIM}(已忽略){Colors.RESET}" if ignored else ""
+                padding = " " * (max_cn_width - option['width'])
+                tag_ansi = f"{Colors.DIM}(已忽略){Colors.RESET}" if ignored else ""
 
                 # 被忽略时同时应用淡色 (DIM) 和删除线 (STRIKETHROUGH)
                 ignored_style = f"{Colors.DIM}{Colors.STRIKETHROUGH}" if ignored else ""
+                ignored_reset = Colors.RESET if ignored else ""
 
-                # 保持与原始代码相同的格式
+                # 计算可见宽度: fixed_width + max_cn_width，再根据选中状态微调
+                visible_len = option['fixed_width'] + max_cn_width
                 if is_selected:
                     if self.action_index == 0:
-                        line = f"{Colors.GRAY}│{Colors.RESET} {status_indicator} {Colors.BG_BLUE}{Colors.BOLD}{ignored_style}{cn_text} {Colors.RESET}{padding}  {action_text} {tag_text}"
+                        # 文件名高亮: 名字后多1空格，action前少1空格（2空格而非3空格）
+                        line = f"{Colors.GRAY}│{Colors.RESET} {status_indicator} {Colors.BG_BLUE}{Colors.BOLD}{ignored_style}{cn_text} {Colors.RESET}{padding}  {action_text} {tag_ansi}"
+                        # 净变化: +1(名字后) -1(action前) = 0
                     else:
+                        # 操作高亮: action前2空格而非3空格
                         action_color = Colors.GREEN if ignored else Colors.RED
-                        line = f"{Colors.GRAY}│{Colors.RESET} {status_indicator} {ignored_style}{cn_text}{Colors.RESET if ignored else ''}{padding}  {Colors.BG_BLUE}{Colors.BOLD}{action_color} {action_text} {Colors.RESET}{tag_text}"
+                        line = f"{Colors.GRAY}│{Colors.RESET} {status_indicator} {ignored_style}{cn_text}{ignored_reset}{padding}  {Colors.BG_BLUE}{Colors.BOLD}{action_color} {action_text} {Colors.RESET}{tag_ansi}"
+                        visible_len -= 1
                 else:
-                    line = f"{Colors.GRAY}│{Colors.RESET} {status_indicator} {ignored_style}{cn_text}{Colors.RESET if ignored else ''}{padding}   {action_text} {tag_text}"
+                    line = f"{Colors.GRAY}│{Colors.RESET} {status_indicator} {ignored_style}{cn_text}{ignored_reset}{padding}   {action_text} {tag_ansi}"
 
-                # 计算右边距使行宽等于box_width
-                visible_len = get_display_width(strip_ansi(line))
                 right_padding = max(0, box_width - visible_len - 1)
                 lines.append(line + " " * right_padding + f"{Colors.GRAY}│{Colors.RESET}")
 
             if len(self.options) > max_file_height and display_start + len(display_options) < len(self.options):
                 indicator = f"{Colors.GRAY}│{Colors.RESET}    {Colors.DIM}...{Colors.RESET}"
-                lines.append(indicator + " " * (box_width - 14) + f"{Colors.GRAY}│{Colors.RESET}")
+                # indicator 显示宽度 = 1(│) + 4(空格) + 3(...) = 8
+                lines.append(indicator + " " * (box_width - 8 - 1) + f"{Colors.GRAY}│{Colors.RESET}")
 
         # 底边
         lines.append(f"{Colors.GRAY}╰" + "─" * (box_width - 2) + f"╯{Colors.RESET}")
