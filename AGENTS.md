@@ -24,6 +24,27 @@ Windows 终端 TUI 工具，将本地目录同步到 GitHub 仓库。
 
 ## 变更记录
 
+### 26w19b
+
+#### 修改范围
+- `github_sync.py` — `GitManager` 类推送失败回显优化
+
+#### 原因与背景
+- `force_push()` 失败时直接输出 Git 原始错误信息（如 `fatal: unable to access '...': Recv failure: Connection`），用户难以理解具体原因
+- Git 错误信息变体多（`Recv failure`、`Failed to connect`、`Connection reset` 等），统一归类为可读的中文提示更直观
+
+#### 行为差异
+- 新增 `_parse_push_error()` 方法，将 Git 错误信息匹配为中文原因提示
+- 覆盖 7 种常见错误类型：网络连接失败、DNS 解析失败、连接超时、认证失败、仓库不存在、推送被拒绝、无需推送
+- 回显格式从 `强制推送失败: {原始信息}` 改为 `推送失败：{中文原因}`
+- 未匹配的错误类型显示 `未知错误: {原始信息}` 作为兜底
+
+#### 系统影响
+- 仅影响 `GitManager.force_push()` 的日志输出格式，不影响推送逻辑本身
+
+#### 关键问题
+- 错误关键词匹配需覆盖常见变体：`Recv failure`、`Failed to connect`、`Connection` 等均归为网络连接失败
+
 ### 26w19a
 
 #### 修改范围

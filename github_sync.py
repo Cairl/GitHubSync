@@ -472,7 +472,26 @@ class GitManager:
             self.log("强制推送成功", "SUCCESS")
             self.publish_release()
         else:
-            self.log(f"强制推送失败: {m}", "ERROR")
+            reason = self._parse_push_error(m)
+            self.log(f"推送失败：{reason}", "ERROR")
+
+    def _parse_push_error(self, msg: str) -> str:
+        m = msg.lower()
+        if "recv failure" in m or "connection" in m or "failed to connect" in m:
+            return "网络连接失败，请检查网络或代理设置"
+        if "could not resolve host" in m:
+            return "DNS 解析失败，无法连接到 GitHub"
+        if "timeout" in m:
+            return "连接超时，网络可能不稳定"
+        if "authentication failed" in m or "403" in m:
+            return "认证失败，请检查 GitHub 登录状态"
+        if "repository not found" in m or "404" in m:
+            return "仓库不存在或没有访问权限"
+        if "rejected" in m and "non-fast-forward" in m:
+            return "推送被拒绝，远程仓库有更新未同步"
+        if "everything up-to-date" in m:
+            return "无需推送，所有内容已是最新"
+        return f"未知错误: {msg}" 
 
 # ─── TUI 应用程序 ───────
 class App:
