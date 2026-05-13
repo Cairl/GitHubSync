@@ -1,0 +1,29 @@
+*.pyc
+.env
+.DS_Store
+.vscode/
+.idea/
+dist/
+build/
+*.spec
+venv/
+
+
+
+__pycache__
+
+Gemini CLI.lnk
+
+*.lnk
+
+CLaude Code.lnk
+
+tests
+
+.trae
+
+.pytest_cache
+
+docs
+
+run_sync.bat
