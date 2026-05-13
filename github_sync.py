@@ -374,7 +374,7 @@ class GitManager:
 
             try:
                 os.remove(releases_path)
-                self.log("changelog.md 删除成功", "INFO")
+                self.log("删除成功 changelog.md", "INFO")
             except OSError as e:
                 self.log(f"删除 changelog.md 失败: {e}", "WARN")
 
