@@ -328,7 +328,7 @@ class GitManager:
             return f"{current_prefix}a"
 
     def publish_release(self):
-        releases_path = os.path.join(self.cwd, "release.md")
+        releases_path = os.path.join(self.cwd, "changelog.md")
         if not os.path.exists(releases_path):
             return
 
@@ -336,7 +336,7 @@ class GitManager:
             with open(releases_path, "r", encoding="utf-8") as f:
                 body = f.read().strip()
         except OSError as e:
-            self.log(f"读取 release.md 失败: {e}", "ERROR")
+            self.log(f"读取 changelog.md 失败: {e}", "ERROR")
             return
 
         if not body:
@@ -374,9 +374,9 @@ class GitManager:
 
             try:
                 os.remove(releases_path)
-                self.log("已删除 release.md", "INFO")
+                self.log("已删除 changelog.md", "INFO")
             except OSError as e:
-                self.log(f"删除 release.md 失败: {e}", "WARN")
+                self.log(f"删除 changelog.md 失败: {e}", "WARN")
 
         except Exception as e:
             self.log(f"Release 发布异常: {e}", "ERROR")
@@ -770,7 +770,7 @@ class App:
         
         s, m = run_command(f"git push origin {branch}", cwd=self.git.cwd)
         if s:
-            self.git.log(f"已推送: {item_name}", "SUCCESS")
+            self.git.log(f"推送成功: {item_name}", "SUCCESS")
             self.git.updated_items[item_name] = 'A'
         else:
             self.git.log(f"推送失败: {m}", "ERROR")
@@ -987,15 +987,14 @@ class App:
                 padding = " " * (max_cn_width - option['width'])
                 tag_ansi = f"{Colors.DIM}(已忽略){Colors.RESET}" if ignored else ""
 
-                # 被忽略时同时应用淡色 (DIM) 和删除线 (STRIKETHROUGH)
                 ignored_style = f"{Colors.DIM}{Colors.STRIKETHROUGH}" if ignored else ""
                 ignored_reset = Colors.RESET if ignored else ""
+                ignored_strike = Colors.STRIKETHROUGH if ignored else ""
 
-                # 计算可见宽度: fixed_width + max_cn_width，再根据选中状态微调
                 visible_len = option['fixed_width'] + max_cn_width
                 if is_selected:
                     if self.action_index == 0:
-                        line = f"{Colors.GRAY}│{Colors.RESET} {status_indicator}{Colors.BG_BLUE}{Colors.BOLD}{Colors.WHITE}{ignored_style} {cn_text}{padding} {Colors.RESET}  {action_text} {tag_ansi}"
+                        line = f"{Colors.GRAY}│{Colors.RESET} {status_indicator}{Colors.BG_BLUE}{Colors.BOLD}{Colors.WHITE} {ignored_strike}{cn_text}{Colors.RESET}{Colors.BG_BLUE}{Colors.BOLD}{Colors.WHITE}{padding} {Colors.RESET}  {action_text} {tag_ansi}"
                     else:
                         action_color = Colors.GREEN if ignored else Colors.RED
                         line = f"{Colors.GRAY}│{Colors.RESET} {status_indicator} {ignored_style}{cn_text}{ignored_reset}{padding}  {Colors.BG_BLUE}{Colors.BOLD}{action_color} {action_text} {Colors.RESET}{tag_ansi}"

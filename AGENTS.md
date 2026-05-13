@@ -17,7 +17,7 @@ GitHubSync/
 ├── run_sync.bat      # 启动器脚本，将自身所在目录作为同步目标
 ├── AGENTS.md         # 本文件
 ├── AGENTS.py         # 示例/测试用的同步目标文件
-└── release.md        # Release 说明模板（存在时自动发布 GitHub Release）
+└── changelog.md      # Changelog 说明模板（存在时自动发布 GitHub Release）
 ```
 
 ### 代码架构
@@ -84,7 +84,7 @@ python github_sync.py
 
 - 应用启动后自动执行同步，可在同步完成后观察 TUI 状态面板
 - 日志区域显示最近的操作记录（同步、推送、删除等）
-- 按 `↑` `↓` 切换文件，按 `Tab` 切换文件名/操作高亮，按 `Enter` 执行
+- 按 `↑` `↓` 切换文件，按 `←` `→` 切换文件名/操作高亮，按 `Enter` 执行
 - 60 秒无操作自动退出
 
 ## Testing Instructions
@@ -146,11 +146,26 @@ python github_sync.py
 
 ```bash
 # 发布新版本流程
-# 1. 更新 release.md 写入版本说明
-# 2. 运行同步工具，自动检测 release.md 并通过 gh release create 发布 GitHub Release
+# 1. 更新 changelog.md 写入版本说明
+# 2. 运行同步工具，自动检测 changelog.md 并通过 gh release create 发布 GitHub Release
 python github_sync.py
 ```
 
 - 无构建步骤，直接运行 Python 脚本
 - `run_sync.bat` 可作为独立启动器分发到任意目录，自动以 bat 所在目录作为同步目标
 - `.gitignore` 默认包含 `run_sync.bat`，避免启动器被意外提交
+
+## Pull Request Guidelines
+
+- 提交前运行语法检查确保无错误
+- 更新 `changelog.md` 记录本次变更，格式遵循 `cairl-changelog-management` 规范
+- 更新 `AGENTS.md` 与 `changelog.md` 保持同步（内容彼此独立，但需同步维护）
+- 提交信息使用中文，简要描述变更内容
+
+## Changelog 管理
+
+- `changelog.md` 仅保留本次更新的变更内容，不记录历史版本
+- 存在旧内容时直接覆盖，而非追加
+- 分类顺序固定为 **添加 → 修复 → 优化**，无内容的分类整体省略
+- 条目格式：`- **功能名**: 描述`
+- 更新 `AGENTS.md` 时必须同步更新 `changelog.md`，反之亦然
