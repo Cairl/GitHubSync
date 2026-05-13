@@ -70,22 +70,51 @@ python github_sync.py
 python github_sync.py "C:\path\to\project"
 ```
 
+> **注意**：如果 `python` 命令不可用，尝试使用 Windows Python 启动器 `py`：
+> ```bash
+> py github_sync.py
+> py github_sync.py "C:\path\to\project"
+> ```
+
 ## Development Workflow
 
 ```bash
-# 语法检查
-python -c "import py_compile; py_compile.compile(r's:\Github Repositories\GitHubSync\github_sync.py', doraise=True)"
+# 语法检查（在项目根目录执行）
+python -c "import py_compile; py_compile.compile('github_sync.py', doraise=True)"
 
 # 运行应用（同步当前工作目录）
 python github_sync.py
 ```
 
+## Keyboard Shortcuts
+
+| 按键 | 功能 |
+|---|---|
+| `↑` `↓` | 切换选中文件 |
+| `←` `→` | 切换焦点（文件名 / 操作按钮） |
+| `Enter` | 执行操作（焦点在操作按钮时）或切换到操作按钮（焦点在文件名时） |
+| `Esc` / `Q` | 取消确认对话框 |
+| `O` | 在浏览器中打开远程仓库 |
+
+- 60 秒无操作自动退出
+- 操作执行后有 1 秒冷却期，防止误触
+
+## Troubleshooting
+
+### 常见问题
+
+- **`python` 命令找不到**：使用 `py` 代替 `python`，或在系统 PATH 中添加 Python 安装路径
+- **`gh` 命令找不到**：运行 `winget install --id GitHub.cli` 安装 GitHub CLI
+- **推送失败（认证错误）**：运行 `gh auth login` 重新登录 GitHub
+- **推送失败（仓库不存在）**：工具会自动打开浏览器创建仓库，完成后自动检测并继续同步
+- **终端显示乱码**：确保使用 Windows Terminal 或支持 VT100 的终端，CMD 原生终端可能不完全支持 ANSI 转义序列
+
 ### 调试技巧
 
 - 应用启动后自动执行同步，可在同步完成后观察 TUI 状态面板
-- 日志区域显示最近的操作记录（同步、推送、删除等）
-- 按 `↑` `↓` 切换文件，按 `←` `→` 切换文件名/操作高亮，按 `Enter` 执行
-- 60 秒无操作自动退出
+- 日志区域显示最近的操作记录（同步、推送、删除等），按时间倒序
+- 状态面板显示当前分支、远程仓库地址（可点击跳转）、最新 Release 版本
+- 文件列表中带 `(已忽略)` 标签的表示已被 `.gitignore` 排除，不会被同步
 
 ## Testing Instructions
 

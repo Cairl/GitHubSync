@@ -239,7 +239,7 @@ class GitManager:
         try:
             with open(gitignore_path, "w", encoding="utf-8") as f:
                 f.write(content)
-            self.log("已创建默认 .gitignore", "SUCCESS")
+            self.log("默认 .gitignore 创建成功", "SUCCESS")
         except Exception as e:
             self.log(f"创建失败: {e}", "ERROR")
 
@@ -374,7 +374,7 @@ class GitManager:
 
             try:
                 os.remove(releases_path)
-                self.log("已删除 changelog.md", "INFO")
+                self.log("changelog.md 删除成功", "INFO")
             except OSError as e:
                 self.log(f"删除 changelog.md 失败: {e}", "WARN")
 
@@ -405,7 +405,7 @@ class GitManager:
         if not s: 
             s, m = run_command(f"git remote set-url origin {url}", cwd=self.cwd)
         
-        if s: self.log(f"远程仓库已设置为: {url}", "SUCCESS")
+        if s: self.log(f"远程仓库设置成功: {url}", "SUCCESS")
         else: self.log(f"设置远程失败: {m}", "ERROR")
 
     def sync(self):
@@ -487,7 +487,7 @@ class GitManager:
                     self.log("合并成功，重新推送", "INFO")
                     s_push, m_push = run_command("git push -u origin main", cwd=self.cwd)
                     if s_push:
-                        self.log("同步成功 (已合并)", "SUCCESS")
+                        self.log("同步成功 (合并成功)", "SUCCESS")
                         self.publish_release()
                         return
                     else:
@@ -527,7 +527,7 @@ class GitManager:
             # 使用 gh api 检查仓库是否存在（支持私有仓库）
             s, m = run_command(f'gh repo view {username}/{repo_name}')
             if s:
-                self.log("检测到仓库已创建", "SUCCESS")
+                self.log("检测到仓库创建成功", "SUCCESS")
                 break
             if self.on_log:
                 self.on_log()
@@ -811,7 +811,7 @@ class App:
             if not remote_url.startswith("http"):
                 remote_url = f"https://{remote_url.replace('git@', '').replace(':', '/')}"
             webbrowser.open(remote_url)
-            self.git.log(f"已打开: {remote_url}", "SUCCESS")
+            self.git.log(f"打开成功: {remote_url}", "SUCCESS")
         else:
             self.git.log("未配置远程仓库", "WARN")
 
@@ -829,7 +829,7 @@ class App:
                     shutil.rmtree(path)
                 else:
                     os.remove(path)
-                self.git.log(f"已从本地磁盘物理删除: {item_name}", "SUCCESS")
+                self.git.log(f"从本地磁盘物理删除成功: {item_name}", "SUCCESS")
                 self.refresh_file_list()
             except Exception as e:
                 self.git.log(f"物理删除失败: {e}", "ERROR")
@@ -1131,7 +1131,7 @@ class App:
                     self.running = False
                 time.sleep(0.01)
 
-        print("\n已退出。")
+        print("\n退出成功。")
 
 if __name__ == "__main__":
     try:
