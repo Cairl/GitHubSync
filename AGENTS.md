@@ -41,6 +41,7 @@ Git 逻辑层
     ├── get_status()       # 获取仓库状态（分支、远程地址）
     ├── init_repo()        # 初始化 Git 仓库
     ├── sync()             # 核心同步流程：扫描→暂存→提交→推送
+    ├── create_github_repo() # 创建 GitHub 仓库（保留本地 Git 历史，仅配置远程地址）
     ├── force_push()       # 强制推送（含错误解析）
     ├── publish_release()  # 发布 GitHub Release
     └── _parse_push_error() # 推送错误中文翻译

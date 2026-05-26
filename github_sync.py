@@ -535,18 +535,10 @@ class GitManager:
             self.log("等待仓库创建超时（5分钟）", "ERROR")
             return False
 
-        # 静默删除 .git 并重新初始化，确保新仓库同步干净
-        dot_git_path = os.path.join(self.cwd, ".git")
-        if os.path.exists(dot_git_path):
-            run_command('rmdir /s /q .git', cwd=self.cwd)
-            if os.path.exists(dot_git_path):
-                shutil.rmtree(dot_git_path, ignore_errors=True)
-
-        run_command("git init", cwd=self.cwd)
-        run_command("git add .", cwd=self.cwd)
-        run_command(f'git commit -m "Initial sync {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}"', cwd=self.cwd)
-        run_command("git branch -M main", cwd=self.cwd)
-        run_command(f"git remote add origin {remote_url}", cwd=self.cwd)
+        # 确保远程地址正确配置
+        s, m = run_command(f"git remote add origin {remote_url}", cwd=self.cwd)
+        if not s:
+            run_command(f"git remote set-url origin {remote_url}", cwd=self.cwd)
 
         return True
 
