@@ -1,0 +1,52 @@
+from rich.style import Style
+
+# ─── Catppuccin Mocha 颜色主题 ───────
+STYLE_BOLD      = Style(bold=True)
+STYLE_DIM       = Style(dim=True)
+STYLE_RED       = Style(color="#F38BA8")
+STYLE_GREEN     = Style(color="#A6E3A1")
+STYLE_YELLOW    = Style(color="#F9E2AF")
+STYLE_BLUE      = Style(color="#89B4FA")
+STYLE_GRAY      = Style(color="#6C7086")
+STYLE_WHITE     = Style(color="#CDD6F4")
+STYLE_STRIKE    = Style(strike=True, dim=True)
+STYLE_SELECTED  = Style(bgcolor="#31748F", bold=True, color="#CDD6F4")
+STYLE_LINK      = Style(color="#89B4FA", underline=True)
+
+# ─── 日志样式 ───────
+STYLE_LOG_SUCCESS = Style(color="#A6E3A1", bold=True)
+STYLE_LOG_ERROR   = Style(color="#F38BA8", bold=True)
+STYLE_LOG_WARN    = Style(color="#F9E2AF", bold=True)
+STYLE_LOG_INFO    = Style(color="#89B4FA", bold=True)
+
+LEVEL_STYLES = {
+    "SUCCESS": STYLE_LOG_SUCCESS,
+    "ERROR": STYLE_LOG_ERROR,
+    "WARN": STYLE_LOG_WARN,
+    "INFO": STYLE_LOG_INFO,
+}
+
+LEVEL_LABELS = {
+    "SUCCESS": "成功",
+    "ERROR": "错误",
+    "WARN": "警告",
+    "INFO": "信息",
+}
+
+# ─── 键盘扫描码 ───────
+KEY_UP    = b"H"
+KEY_DOWN  = b"P"
+KEY_LEFT  = b"K"
+KEY_RIGHT = b"M"
+KEY_ENTER = b"\r"
+KEY_ESC   = b"\x1b"
+KEY_Q     = b"q"
+KEY_O     = b"o"
+
+# ─── 超时设置 ───────
+IDLE_TIMEOUT = 60
+COOLDOWN_PERIOD = 1.0
+
+# ─── 布局尺寸 ───────
+STATUS_PANEL_HEIGHT = 6
+LOG_PANEL_HEIGHT = 8
