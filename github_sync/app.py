@@ -4,14 +4,10 @@ import time
 import shutil
 import msvcrt
 
-from rich.console import Console
+from rich.console import Console, Group
 from rich.live import Live
-from rich.layout import Layout
-from rich.panel import Panel
-from rich.table import Table
 from rich.text import Text
 from rich.style import Style
-from rich import box
 
 from .config import (
     STYLE_BOLD, STYLE_DIM, STYLE_RED, STYLE_GREEN, STYLE_YELLOW,
@@ -114,10 +110,16 @@ class App:
         except Exception as e:
             self.git.log(f"刷新文件列表失败: {e}", "ERROR")
 
-    def build_status_panel(self):
-        status = self._get_status()
-        content = Text()
+    def build_main_box(self):
+        box_width = 60
+        TL, TR = '╭', '╮'
+        BL, BR = '╰', '╯'
+        H, V = '─', '│'
 
+        lines = []
+        lines.append(Text(f"{TL}{H * (box_width - 2)}{TR}", style=STYLE_GRAY))
+
+        status = self._get_status()
         if status["initialized"]:
             remote_raw = status["remote"]
             if remote_raw.startswith("git@"):
@@ -127,169 +129,184 @@ class App:
             else:
                 osc_url = f"https://{remote_raw}"
 
-            content.append("项目: ", style=STYLE_GRAY)
-            content.append(os.path.basename(self.git.cwd), style=STYLE_WHITE)
-            content.append("\n")
+            status_entries = [
+                ("项目: ", STYLE_GRAY, os.path.basename(self.git.cwd), STYLE_WHITE),
+                ("分支: ", STYLE_GRAY, status["branch"], STYLE_WHITE),
+            ]
 
-            content.append("分支: ", style=STYLE_GRAY)
-            content.append(status["branch"], style=STYLE_WHITE)
-            content.append("\n")
-
-            content.append("远程: ", style=STYLE_GRAY)
+            remote_line = Text()
+            remote_line.append("远程: ", style=STYLE_GRAY)
             if remote_raw != "未配置":
-                content.append(remote_raw, style=Style(link=osc_url, color="#F9E2AF"))
+                remote_line.append(remote_raw, style=Style(link=osc_url, color="#F9E2AF"))
             else:
-                content.append("未配置", style=STYLE_DIM)
-            content.append("\n")
+                remote_line.append("未配置", style=STYLE_DIM)
 
             latest_release = self._get_release()
-            content.append("版本: ", style=STYLE_GRAY)
+            version_line = Text()
+            version_line.append("版本: ", style=STYLE_GRAY)
             if latest_release:
                 release_url = f"{osc_url}/releases/tag/{latest_release}"
-                content.append(latest_release, style=Style(link=release_url, color="#A6E3A1"))
+                version_line.append(latest_release, style=Style(link=release_url, color="#A6E3A1"))
             else:
-                content.append("无", style=STYLE_DIM)
+                version_line.append("无", style=STYLE_DIM)
         else:
-            content.append("未初始化 Git 仓库", style=STYLE_RED)
-            content.append("\n")
-            content.append("启动时将自动初始化", style=STYLE_DIM)
+            status_entries = []
+            remote_line = Text("未初始化 Git 仓库", style=STYLE_RED)
+            version_line = Text("启动时将自动初始化", style=STYLE_DIM)
 
-        return Panel(
-            content,
-            title=os.path.basename(self.git.cwd),
-            box=box.ROUNDED,
-            border_style=STYLE_GRAY,
-        )
+        for label, label_style, value, value_style in status_entries:
+            line = Text()
+            line.append(label, style=label_style)
+            line.append(value, style=value_style)
+            self._add_box_line(lines, line, box_width, V)
 
-    def build_timer_bar(self):
+        self._add_box_line(lines, remote_line, box_width, V)
+        self._add_box_line(lines, version_line, box_width, V)
+
+        if self.first_sync_done and self.file_items:
+            rem = max(0, min(box_width - 4, self.timeout_seconds))
+            elap = (box_width - 4) - rem
+            timer = Text()
+            timer.append(V, style=STYLE_GRAY)
+            timer.append(" ")
+            timer.append("─" * rem, style=STYLE_DIM)
+            timer.append("┄" * elap, style=STYLE_BLUE)
+            timer.append(" ")
+            timer.append(V, style=STYLE_GRAY)
+            lines.append(timer)
+
+            try:
+                term_height = shutil.get_terminal_size().lines
+            except Exception:
+                term_height = 24
+            reserved = 6 + 8
+            max_file_height = max(3, term_height - reserved)
+
+            display_start = 0
+            display_items = self.file_items
+            show_top = False
+            show_bottom = False
+
+            if len(self.file_items) > max_file_height:
+                half = max_file_height // 2
+                display_start = max(0, self.selected_index - half)
+                end = min(len(self.file_items), display_start + max_file_height)
+                if end == len(self.file_items):
+                    display_start = max(0, end - max_file_height)
+                display_items = self.file_items[display_start:end]
+                show_top = display_start > 0
+                show_bottom = (display_start + len(display_items)) < len(self.file_items)
+
+            if show_top:
+                ind = Text()
+                ind.append(V, style=STYLE_GRAY)
+                ind.append("    ")
+                ind.append("...", style=STYLE_DIM)
+                ind.append(" " * (box_width - 8 - 1))
+                ind.append(V, style=STYLE_GRAY)
+                lines.append(ind)
+
+            for i, item in enumerate(display_items):
+                actual_index = display_start + i
+                is_selected = (actual_index == self.selected_index)
+                name = item["name"]
+
+                line = Text()
+                line.append(V, style=STYLE_GRAY)
+                line.append(" ")
+
+                status_char = self.git.updated_items.get(name)
+                if status_char == 'A':
+                    line.append("[+]", style=STYLE_GREEN)
+                elif status_char == 'D':
+                    line.append("[-]", style=STYLE_RED)
+                else:
+                    line.append("   ")
+
+                name_style = STYLE_SELECTED if is_selected else (STYLE_STRIKE if item["ignored"] else STYLE_WHITE)
+                line.append(f" {name}", style=name_style)
+
+                if is_selected and self.action_index == 1:
+                    action_color = STYLE_GREEN if item["ignored"] else STYLE_RED
+                    line.append(f"  ")
+                    line.append(f" {item['action_text']} ", style=Style(
+                        bgcolor="#31748F", bold=True,
+                        color=action_color.color if action_color.color else "#CDD6F4"
+                    ))
+                else:
+                    line.append(f"   {item['action_text']} ", style=STYLE_DIM)
+
+                if item["tag_text"]:
+                    line.append(f" {item['tag_text']}", style=STYLE_DIM)
+
+                visible = 1 + 1 + 3 + 1 + len(name) + 3 + len(item["action_text"]) + 1
+                if item["tag_text"]:
+                    visible += 1 + len(item["tag_text"])
+                padding = max(0, box_width - visible - 1)
+                line.append(" " * padding)
+                line.append(V, style=STYLE_GRAY)
+                lines.append(line)
+
+            if show_bottom:
+                ind = Text()
+                ind.append(V, style=STYLE_GRAY)
+                ind.append("    ")
+                ind.append("...", style=STYLE_DIM)
+                ind.append(" " * (box_width - 8 - 1))
+                ind.append(V, style=STYLE_GRAY)
+                lines.append(ind)
+
+        lines.append(Text(f"{BL}{H * (box_width - 2)}{BR}", style=STYLE_GRAY))
+        return Group(*lines)
+
+    def _add_box_line(self, lines, content, box_width, V):
+        line = Text()
+        line.append(V, style=STYLE_GRAY)
+        line.append(" ")
+        line.append_text(content)
+        visible = 1 + 1 + len(content.plain)
+        padding = max(0, box_width - visible - 1)
+        line.append(" " * padding)
+        line.append(V, style=STYLE_GRAY)
+        lines.append(line)
+
+    def build_log_text(self):
         try:
-            width = shutil.get_terminal_size().columns
+            term_width = shutil.get_terminal_size().columns
         except Exception:
-            width = 80
-
-        bar_width = width - 6
-        elapsed_ratio = 1.0 - (self.timeout_seconds / IDLE_TIMEOUT)
-        filled = int(bar_width * elapsed_ratio)
-        empty = bar_width - filled
-
-        bar = Text()
-        bar.append("─" * filled, style=STYLE_DIM)
-        bar.append("┄" * empty, style=STYLE_BLUE)
-        bar.append(f" {self.timeout_seconds}s", style=STYLE_GRAY)
-        return bar
-
-    def build_file_table(self):
-        if not self.file_items or self.file_items[0]["name"] == "(空目录)":
-            return Text("  (空目录)", style=STYLE_GRAY)
+            term_width = 80
 
         try:
             term_height = shutil.get_terminal_size().lines
         except Exception:
             term_height = 24
 
-        visible_rows = max(3, term_height - STATUS_PANEL_HEIGHT - 1 - LOG_PANEL_HEIGHT - 4)
+        status = self._get_status()
+        box_lines = 2 + 4 + 1
+        if self.first_sync_done and self.file_items:
+            box_lines += min(len(self.file_items), max(3, term_height - 14))
+        available = max(1, term_height - box_lines - 2)
 
-        display_start = 0
-        display_items = self.file_items
-        show_top_indicator = False
-        show_bottom_indicator = False
-
-        if len(self.file_items) > visible_rows:
-            half = visible_rows // 2
-            display_start = max(0, self.selected_index - half)
-            end = min(len(self.file_items), display_start + visible_rows)
-            if end == len(self.file_items):
-                display_start = max(0, end - visible_rows)
-            display_items = self.file_items[display_start:end]
-            show_top_indicator = display_start > 0
-            show_bottom_indicator = (display_start + len(display_items)) < len(self.file_items)
-
-        table = Table(
-            show_header=False,
-            show_lines=False,
-            box=None,
-            padding=(0, 1),
-            expand=True,
-        )
-        table.add_column("status", width=3, no_wrap=True)
-        table.add_column("name", ratio=1, no_wrap=True)
-        table.add_column("action", no_wrap=True)
-        table.add_column("tag", no_wrap=True)
-
-        if show_top_indicator:
-            table.add_row(Text(""), Text("...", style=STYLE_DIM), Text(""), Text(""))
-
-        for i, item in enumerate(display_items):
-            actual_index = display_start + i
-            is_selected = (actual_index == self.selected_index)
-            name = item["name"]
-
-            status_char = self.git.updated_items.get(name)
-            if status_char == 'A':
-                status_text = Text("[+]", style=STYLE_GREEN)
-            elif status_char == 'D':
-                status_text = Text("[-]", style=STYLE_RED)
-            else:
-                status_text = Text("   ")
-
-            if is_selected:
-                name_style = STYLE_SELECTED
-            elif item["ignored"]:
-                name_style = STYLE_STRIKE
-            else:
-                name_style = STYLE_WHITE
-
-            name_text = Text(f" {name}", style=name_style)
-
-            action_label = item["action_text"]
-            if is_selected and self.action_index == 1:
-                action_color = STYLE_GREEN if item["ignored"] else STYLE_RED
-                action_text = Text(f" {action_label} ", style=Style(
-                    bgcolor="#31748F", bold=True,
-                    color=action_color.color if action_color.color else "#CDD6F4"
-                ))
-            else:
-                action_text = Text(f" {action_label} ", style=STYLE_DIM)
-
-            tag_text = Text(item["tag_text"], style=STYLE_DIM) if item["tag_text"] else Text("")
-
-            table.add_row(status_text, name_text, action_text, tag_text)
-
-        if show_bottom_indicator:
-            table.add_row(Text(""), Text("...", style=STYLE_DIM), Text(""), Text(""))
-
-        return table
-
-    def build_log_panel(self):
-        max_lines = LOG_PANEL_HEIGHT - 2
-        recent_logs = self.git.logs[-max_lines:] if len(self.git.logs) > max_lines else self.git.logs
+        recent = self.git.logs[-available:] if len(self.git.logs) > available else self.git.logs
 
         content = Text()
-        for i, (timestamp, level, message) in enumerate(recent_logs):
+        for i, (timestamp, level, message) in enumerate(recent):
             if i > 0:
                 content.append("\n")
             label = LEVEL_LABELS.get(level, level)
             style = LEVEL_STYLES.get(level, STYLE_WHITE)
-            content.append(f"[{timestamp}] ", style=STYLE_DIM)
+            content.append(f" [{timestamp}] ", style=STYLE_DIM)
             content.append(f"{label} ", style=style)
             content.append(message)
-
-        return Panel(
-            content,
-            title="日志",
-            box=box.ROUNDED,
-            border_style=STYLE_GRAY,
-        )
+        return content
 
     def build_screen(self):
-        layout = Layout()
-        layout.split_column(
-            Layout(self.build_status_panel(), size=STATUS_PANEL_HEIGHT),
-            Layout(self.build_timer_bar(), size=1),
-            Layout(self.build_file_table(), ratio=1),
-            Layout(self.build_log_panel(), size=LOG_PANEL_HEIGHT),
-        )
-        return layout
+        parts = [self.build_main_box()]
+        log_text = self.build_log_text()
+        if log_text.plain:
+            parts.append(Text(""))
+            parts.append(log_text)
+        return Group(*parts)
 
     def handle_key(self, key):
         if key == KEY_UP:
