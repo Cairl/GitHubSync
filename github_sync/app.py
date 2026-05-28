@@ -16,7 +16,7 @@ from .config import (
     KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_ENTER, KEY_ESC, KEY_Q, KEY_O,
     IDLE_TIMEOUT, COOLDOWN_PERIOD, STATUS_PANEL_HEIGHT, LOG_PANEL_HEIGHT,
 )
-from .utils import enable_vt100, run_command, get_key
+from .utils import enable_vt100, run_command, get_key, get_display_width
 from .git_manager import GitManager
 
 
@@ -239,9 +239,13 @@ class App:
                 if item["tag_text"]:
                     line.append(f" {item['tag_text']}", style=STYLE_DIM)
 
-                visible = 1 + 1 + 3 + 1 + len(name) + 3 + len(item["action_text"]) + 1
+                visible = 1 + 1 + 3 + 1 + get_display_width(name)
+                if is_selected and self.action_index == 1:
+                    visible += 2 + 1 + get_display_width(item["action_text"]) + 1
+                else:
+                    visible += 3 + get_display_width(item["action_text"]) + 1
                 if item["tag_text"]:
-                    visible += 1 + len(item["tag_text"])
+                    visible += 1 + get_display_width(item["tag_text"])
                 padding = max(0, box_width - visible - 1)
                 line.append(" " * padding)
                 line.append(V, style=STYLE_GRAY)
@@ -264,7 +268,7 @@ class App:
         line.append(V, style=STYLE_GRAY)
         line.append(" ")
         line.append_text(content)
-        visible = 1 + 1 + len(content.plain)
+        visible = 1 + 1 + get_display_width(content.plain)
         padding = max(0, box_width - visible - 1)
         line.append(" " * padding)
         line.append(V, style=STYLE_GRAY)

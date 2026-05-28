@@ -1,11 +1,22 @@
 import os
 import sys
 import subprocess
+import unicodedata
 import msvcrt
 
 
 def enable_vt100():
     os.system("")
+
+
+def get_display_width(text):
+    width = 0
+    for char in str(text):
+        if unicodedata.east_asian_width(char) in ('F', 'W'):
+            width += 2
+        else:
+            width += 1
+    return width
 
 
 def run_command(command, cwd=None):
