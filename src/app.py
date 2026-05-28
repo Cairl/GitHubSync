@@ -219,29 +219,42 @@ class App:
 
                 line = Text()
                 line.append(V, style=STYLE_GRAY)
-                line.append(" ")
-
-                status_char = self.git.updated_items.get(name)
-                if status_char == 'A':
-                    line.append("[+]", style=STYLE_GREEN)
-                elif status_char == 'D':
-                    line.append("[-]", style=STYLE_RED)
-                else:
-                    line.append("   ")
 
                 if is_selected:
                     if item["ignored"]:
                         name_style = Style(bgcolor="#31748F", bold=True, color="#CDD6F4", strike=True)
                     else:
                         name_style = STYLE_SELECTED
-                elif item["ignored"]:
-                    name_style = STYLE_STRIKE
+                    line.append(" ", style=name_style)
+                    status_char = self.git.updated_items.get(name)
+                    if status_char == 'A':
+                        line.append("[+]", style=Style(bgcolor="#31748F", color="#A6E3A1"))
+                    elif status_char == 'D':
+                        line.append("[-]", style=Style(bgcolor="#31748F", color="#F38BA8"))
+                    else:
+                        line.append("   ", style=name_style)
+                    line.append(" ", style=name_style)
+                    line.append(name, style=name_style)
+                    name_pad = max_name_width - get_display_width(name)
+                    line.append(" " * name_pad, style=name_style)
+                    line.append(" ", style=name_style)
                 else:
-                    name_style = STYLE_WHITE
-                line.append(" ")
-                line.append(name, style=name_style)
-                name_pad = max_name_width - get_display_width(name)
-                line.append(" " * name_pad)
+                    if item["ignored"]:
+                        name_style = STYLE_STRIKE
+                    else:
+                        name_style = STYLE_WHITE
+                    line.append(" ")
+                    status_char = self.git.updated_items.get(name)
+                    if status_char == 'A':
+                        line.append("[+]", style=STYLE_GREEN)
+                    elif status_char == 'D':
+                        line.append("[-]", style=STYLE_RED)
+                    else:
+                        line.append("   ")
+                    line.append(" ")
+                    line.append(name, style=name_style)
+                    name_pad = max_name_width - get_display_width(name)
+                    line.append(" " * name_pad)
 
                 if is_selected and self.action_index == 1:
                     action_color = STYLE_GREEN if item["ignored"] else STYLE_RED
