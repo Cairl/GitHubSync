@@ -240,7 +240,8 @@ class App:
                     name_style = STYLE_WHITE
                 line.append(f" {name}", style=name_style)
                 name_pad = max_name_width - get_display_width(name)
-                line.append(" " * name_pad, style=name_style if is_selected else None)
+                extra_pad = " " if is_selected else ""
+                line.append(" " * name_pad + extra_pad, style=name_style if is_selected else None)
 
                 if is_selected and self.action_index == 1:
                     action_color = STYLE_GREEN if item["ignored"] else STYLE_RED
