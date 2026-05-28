@@ -238,7 +238,8 @@ class App:
                     name_style = STYLE_STRIKE
                 else:
                     name_style = STYLE_WHITE
-                line.append(f" {name}", style=name_style)
+                line.append(" ")
+                line.append(name, style=name_style)
                 name_pad = max_name_width - get_display_width(name)
                 line.append(" " * name_pad)
 
