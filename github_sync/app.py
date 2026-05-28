@@ -229,7 +229,15 @@ class App:
                 else:
                     line.append("   ")
 
-                name_style = STYLE_SELECTED if is_selected else (STYLE_STRIKE if item["ignored"] else STYLE_WHITE)
+                if is_selected:
+                    if item["ignored"]:
+                        name_style = Style(bgcolor="#31748F", bold=True, color="#CDD6F4", strike=True)
+                    else:
+                        name_style = STYLE_SELECTED
+                elif item["ignored"]:
+                    name_style = STYLE_STRIKE
+                else:
+                    name_style = STYLE_WHITE
                 line.append(f" {name}", style=name_style)
                 name_pad = max_name_width - get_display_width(name)
                 line.append(" " * name_pad)
@@ -247,13 +255,7 @@ class App:
                 if item["tag_text"]:
                     line.append(f" {item['tag_text']}", style=STYLE_DIM)
 
-                visible = 1 + 1 + 3 + 1 + 1 + max_name_width
-                if is_selected and self.action_index == 1:
-                    visible += 2 + 1 + get_display_width(item["action_text"]) + 1
-                else:
-                    visible += 3 + get_display_width(item["action_text"]) + 1
-                if item["tag_text"]:
-                    visible += 1 + get_display_width(item["tag_text"])
+                visible = get_display_width(line.plain)
                 padding = max(0, box_width - visible - 1)
                 line.append(" " * padding)
                 line.append(V, style=STYLE_GRAY)
@@ -276,7 +278,7 @@ class App:
         line.append(V, style=STYLE_GRAY)
         line.append(" ")
         line.append_text(content)
-        visible = 1 + 1 + get_display_width(content.plain)
+        visible = get_display_width(line.plain)
         padding = max(0, box_width - visible - 1)
         line.append(" " * padding)
         line.append(V, style=STYLE_GRAY)
@@ -479,16 +481,7 @@ class App:
 
     def run(self):
         enable_vt100()
-
-        if not self.first_sync_done:
-            self.operation_in_progress = True
-            self.git.sync()
-            self.first_sync_done = True
-            self._refresh_caches()
-            self.operation_in_progress = False
-            self.cooldown_until = time.time() + COOLDOWN_PERIOD
-            self.refresh_file_list()
-            self.deadline = time.time() + IDLE_TIMEOUT
+        self.refresh_file_list()
 
         with Live(
             self.build_screen(),
@@ -497,6 +490,18 @@ class App:
             screen=True,
         ) as live:
             self._live = live
+
+            if not self.first_sync_done:
+                self.operation_in_progress = True
+                live.update(self.build_screen())
+                self.git.sync()
+                self.first_sync_done = True
+                self._refresh_caches()
+                self.operation_in_progress = False
+                self.cooldown_until = time.time() + COOLDOWN_PERIOD
+                self.refresh_file_list()
+                self.deadline = time.time() + IDLE_TIMEOUT
+                live.update(self.build_screen())
 
             while self.running:
                 if msvcrt.kbhit():
