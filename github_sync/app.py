@@ -206,6 +206,12 @@ class App:
                 ind.append(V, style=STYLE_GRAY)
                 lines.append(ind)
 
+            max_name_width = 0
+            for item in display_items:
+                w = get_display_width(item["name"])
+                if w > max_name_width:
+                    max_name_width = w
+
             for i, item in enumerate(display_items):
                 actual_index = display_start + i
                 is_selected = (actual_index == self.selected_index)
@@ -225,6 +231,8 @@ class App:
 
                 name_style = STYLE_SELECTED if is_selected else (STYLE_STRIKE if item["ignored"] else STYLE_WHITE)
                 line.append(f" {name}", style=name_style)
+                name_pad = max_name_width - get_display_width(name)
+                line.append(" " * name_pad)
 
                 if is_selected and self.action_index == 1:
                     action_color = STYLE_GREEN if item["ignored"] else STYLE_RED
@@ -239,7 +247,7 @@ class App:
                 if item["tag_text"]:
                     line.append(f" {item['tag_text']}", style=STYLE_DIM)
 
-                visible = 1 + 1 + 3 + 1 + get_display_width(name)
+                visible = 1 + 1 + 3 + 1 + 1 + max_name_width
                 if is_selected and self.action_index == 1:
                     visible += 2 + 1 + get_display_width(item["action_text"]) + 1
                 else:
