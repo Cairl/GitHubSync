@@ -468,6 +468,16 @@ class App:
         except Exception as e:
             self.git.log(f"移除忽略失败: {e}", "ERROR")
 
+    def _configure_remote_with_pause(self):
+        if self._live:
+            self._live.stop()
+            try:
+                self.git.configure_remote()
+            finally:
+                self._live.start()
+        else:
+            self.git.configure_remote()
+
     def open_remote(self):
         import webbrowser
         status = self.git.get_status()
@@ -495,7 +505,7 @@ class App:
             if not self.first_sync_done:
                 self.operation_in_progress = True
                 live.update(self.build_screen())
-                self.git.sync()
+                self.git.sync(configure_remote_fn=self._configure_remote_with_pause)
                 self.first_sync_done = True
                 self._refresh_caches()
                 self.operation_in_progress = False

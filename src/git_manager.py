@@ -225,7 +225,7 @@ class GitManager:
         else:
             self.log(f"设置远程失败: {m}", "ERROR")
 
-    def sync(self):
+    def sync(self, configure_remote_fn=None):
         self.create_ignore()
 
         status = self.get_status()
@@ -272,7 +272,10 @@ class GitManager:
             self.log("没有更改需要提交", "INFO")
 
         if status["remote"] == "未配置":
-            self.configure_remote()
+            if configure_remote_fn:
+                configure_remote_fn()
+            else:
+                self.configure_remote()
             status = self.get_status()
             if status["remote"] == "未配置":
                 return
