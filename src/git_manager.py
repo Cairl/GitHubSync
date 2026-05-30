@@ -206,16 +206,13 @@ class GitManager:
     def configure_remote(self):
         username = self.get_github_username()
         repo_name = os.path.basename(self.cwd)
-        default_url = f"https://github.com/{username}/{repo_name}" if username else ""
-
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        print(f" [{timestamp}] 正在配置远程仓库: ", end="")
-        from .utils import get_input_with_default
-        url = get_input_with_default("", default_url).strip()
+        url = f"https://github.com/{username}/{repo_name}" if username else ""
 
         if not url:
-            self.log("未输入 URL，操作取消", "WARN")
+            self.log("无法获取 GitHub 用户名，远程仓库未配置", "WARN")
             return
+
+        self.log(f"正在配置远程仓库: {url}", "INFO")
         s, m = run_command(f"git remote add origin {url}", cwd=self.cwd)
         if not s:
             s, m = run_command(f"git remote set-url origin {url}", cwd=self.cwd)
@@ -225,7 +222,7 @@ class GitManager:
         else:
             self.log(f"设置远程失败: {m}", "ERROR")
 
-    def sync(self, configure_remote_fn=None):
+    def sync(self):
         self.create_ignore()
 
         status = self.get_status()
@@ -272,10 +269,7 @@ class GitManager:
             self.log("没有更改需要提交", "INFO")
 
         if status["remote"] == "未配置":
-            if configure_remote_fn:
-                configure_remote_fn()
-            else:
-                self.configure_remote()
+            self.configure_remote()
             status = self.get_status()
             if status["remote"] == "未配置":
                 return
