@@ -390,9 +390,9 @@ class App:
                     branch = "main"
 
                 s, m = run_command(f"git push origin {branch}", cwd=self.git.cwd)
-                if not s:
-                    result.failed = True
-                    result.detail = m
+            if not s:
+                result.failed = True
+                result.detail = self.git._parse_push_error(m)
 
         self.refresh_file_list()
         self.git.updated_items[item_name] = 'D'
@@ -456,7 +456,7 @@ class App:
                 self.git.updated_items[item_name] = 'A'
             else:
                 result.failed = True
-                result.detail = m
+                result.detail = self.git._parse_push_error(m)
 
         self.refresh_file_list()
 

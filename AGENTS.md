@@ -5,6 +5,7 @@
 GitHubSync 是一个 Windows 终端 TUI 工具，将本地目录同步到 GitHub 仓库。基于 `git` 和 `gh` CLI 实现全部操作，使用 Rich 库渲染 TUI 界面。
 
 - **语言**: Python 3.12+
+- **版本**: 2.0.0（定义于 `src/__init__.py`）
 - **平台**: Windows only（依赖 `msvcrt`、`shutil.get_terminal_size` 等）
 - **外部依赖**: `git` CLI、`gh` CLI（GitHub 官方命令行工具）
 - **Python 依赖**: `rich>=13.0`（通过 requirements.txt 管理）
@@ -14,16 +15,15 @@ GitHubSync 是一个 Windows 终端 TUI 工具，将本地目录同步到 GitHub
 ```
 GitHubSync/
 ├── src/                  # 源码包
-│   ├── __init__.py       # 包标识
+│   ├── __init__.py       # 包标识，定义 __version__
 │   ├── __main__.py       # 入口：python -m src [目录]
 │   ├── config.py         # 常量：Rich Style 主题、键盘码、布局参数
 │   ├── utils.py          # 工具函数：run_command、get_key、get_display_width
 │   ├── git_manager.py    # GitManager 类：Git 操作管理
 │   └── app.py            # App 类：Rich Live 驱动的 TUI 应用
-├── run_sync.bat          # 启动器脚本，固定指向项目路径，同步 bat 所在目录
+├── sync.bat              # 启动器脚本，固定指向项目路径，同步 bat 所在目录
 ├── requirements.txt      # Python 依赖
 ├── AGENTS.md             # 本文件
-├── AGENTS.py             # 示例/测试用的同步目标文件
 └── changelog.md          # Changelog 说明（存在时自动发布 GitHub Release）
 ```
 
@@ -45,26 +45,41 @@ utils.py — 工具函数层
 
 git_manager.py — Git 逻辑层
 └── GitManager
-    ├── log()            # 结构化日志：(timestamp, level, message) 元组
-    ├── action()         # 上下文管理器：进入时记录"正在"，退出时原地替换为"完成"或"失败"
-    ├── get_status()     # 获取仓库状态（分支、远程地址）
-    ├── init_repo()      # 初始化 Git 仓库
-    ├── configure_remote()  # 自动配置远程仓库（基于 GitHub 用户名 + 目录名）
-    ├── sync()           # 核心同步流程：扫描→暂存→提交→推送
+    ├── log()               # 结构化日志：(timestamp, level, message) 元组
+    ├── action()            # 上下文管理器：进入时记录"正在"，退出时原地替换为"完成"或"失败"
+    ├── get_status()        # 获取仓库状态（分支、远程地址）
+    ├── init_repo()         # 初始化 Git 仓库
+    ├── create_ignore()     # 创建默认 .gitignore
+    ├── get_github_username() # 获取 GitHub 用户名（gh api → git remote → 邻近仓库）
+    ├── get_repo_slug()     # 获取仓库 slug（owner/repo）
+    ├── get_latest_release() # 获取最新 Release 标签名
+    ├── calculate_next_version() # 计算下一版本号（YYwWWa 格式，周内递增字母）
+    ├── configure_remote()  # 自动配置远程仓库（基于 GitHub 用户名 + 目录名，无交互）
+    ├── sync()              # 核心同步流程：扫描→暂存→提交→推送
     ├── create_github_repo() # 创建 GitHub 仓库（浏览器 + 轮询检测）
-    ├── force_push()     # 强制推送（含错误解析）
-    ├── publish_release() # 发布 GitHub Release
-    └── _parse_push_error() # 推送错误中文翻译
+    ├── force_push()        # 强制推送（含错误解析）
+    ├── publish_release()   # 发布 GitHub Release
+    └── _parse_push_error() # 推送错误中文翻译（所有推送失败统一调用）
 
 app.py — TUI 应用层
 └── App
-    ├── build_main_box() # 构建统一圆角框（状态 + 倒计时 + 文件列表）
-    ├── build_log_text() # 构建日志文本（无边框）
-    ├── build_screen()   # 组合完整屏幕（Group）
-    ├── handle_key()     # 按键分发
+    ├── _on_git_log()       # GitManager 日志回调，触发 Live 更新
+    ├── _get_status()       # 获取缓存的状态（懒加载）
+    ├── _get_release()      # 获取缓存的 Release 信息（懒加载）
+    ├── _refresh_caches()   # 刷新状态和 Release 缓存
+    ├── build_main_box()    # 构建统一圆角框（状态 + 倒计时 + 文件列表）
+    ├── build_log_text()    # 构建日志文本（无边框）
+    ├── build_screen()      # 组合完整屏幕（Group）
+    ├── handle_key()        # 按键分发
     ├── refresh_file_list() # 扫描目录生成文件列表
-    ├── execute_action() # 执行删除/推送操作
-    └── run()            # 主循环（Rich Live + msvcrt 按键 + 60s 倒计时）
+    ├── execute_action()    # 执行删除/推送操作
+    ├── remove_from_github() # 从 GitHub 删除文件（git rm + gitignore + push）
+    ├── push_to_github()    # 推送文件到 GitHub（移除 gitignore + add + commit + push）
+    ├── add_to_gitignore()  # 添加条目到 .gitignore
+    ├── remove_from_gitignore() # 从 .gitignore 移除条目
+    ├── confirm_delete()    # 物理删除确认对话框
+    ├── open_remote()       # 在浏览器中打开远程仓库
+    └── run()               # 主循环（Rich Live + msvcrt 按键 + 60s 倒计时）
 ```
 
 ## Setup Commands
@@ -95,7 +110,7 @@ python -m src "C:\path\to\project"
 ## Development Workflow
 
 ```bash
-# 语法检查（在项目根目录执行）
+# 语法检查（在项目根目录执行，逐文件检查）
 python -c "import py_compile; py_compile.compile('src/app.py', doraise=True)"
 
 # 运行应用（同步当前工作目录）
@@ -176,7 +191,8 @@ python -m src
 
 ### 错误处理
 - 子进程错误通过 `run_command()` 统一捕获，合并 stdout 和 stderr 返回
-- `GitManager._parse_push_error()` 将 Git 推送错误翻译为中文提示，大小写不敏感匹配关键词：
+- **所有推送失败统一调用 `_parse_push_error()`** 翻译为中文提示，包括 `sync()`、`force_push()`、`remove_from_github()`、`push_to_github()` 中的推送操作
+- `_parse_push_error()` 大小写不敏感匹配关键词：
   - `recv failure` / `connection` / `failed to connect` → 网络连接异常
   - `could not resolve host` → DNS 解析异常
   - `timeout` → 连接超时
@@ -185,8 +201,18 @@ python -m src
   - `rejected` + `non-fast-forward` → 推送被拒绝
   - `schannel` / `certificate` / `ssl` → SSL 证书验证异常
   - `everything up-to-date` → 无需推送
-- 无法识别的错误回退显示原始英文信息
+- 无法识别的错误回退显示 `未知错误: ` + 原始英文信息
 - Release 发布失败不阻塞同步主流程
+
+### 远程仓库配置
+- `configure_remote()` 全自动配置，无需用户输入
+- 远程 URL 由 `get_github_username()` + 目录名拼接：`https://github.com/{username}/{repo_name}`
+- `get_github_username()` 按优先级尝试：`gh api user` → 当前仓库 git remote → 邻近目录仓库 git remote
+- 推送时若仓库不存在，自动打开浏览器创建并轮询检测
+
+### Rich Live 交互限制
+- Rich 15 不支持 `Live.pause()`，需使用 `Live.stop()` + `Live.start()` 配合 `try/finally` 管理 TUI 状态
+- 用户输入提示在 `Live(screen=True)` 上下文中无法正常工作，避免在全屏 TUI 模式下执行交互式输入
 
 ## Build and Deployment
 
@@ -198,9 +224,9 @@ python -m src
 ```
 
 - 无构建步骤，直接运行 `python -m src`
-- `run_sync.bat` 固定指向项目源码路径（`PROJECT_DIR`），可复制到任意目录使用
+- `sync.bat` 固定指向项目源码路径（`PROJECT_DIR`），可复制到任意目录使用
 - bat 所在目录即为同步目标（`%~dp0`），通过 `PYTHONPATH` 设置源码路径
-- `.gitignore` 默认包含 `run_sync.bat`，避免启动器被意外提交
+- `.gitignore` 默认包含 `sync.bat`，避免启动器被意外提交
 
 ## Pull Request Guidelines
 

@@ -306,7 +306,7 @@ class GitManager:
             s, m = run_command("git push -u origin main", cwd=self.cwd)
             if not s:
                 result.failed = True
-                result.detail = m
+                result.detail = self._parse_push_error(m)
 
         if s:
             self.publish_release()
