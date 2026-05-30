@@ -32,7 +32,7 @@ GitHubSync/
 ```
 config.py — 常量层
 ├── STYLE_*              # Rich Style 对象（Catppuccin Mocha 配色）
-├── LEVEL_STYLES/LABELS  # 日志级别样式和中文标签
+├── LEVEL_STYLES/LABELS  # 日志级别样式和时态标签（正在/完成/失败/注意）
 ├── KEY_*                # 键盘扫描码常量
 └── *_HEIGHT/TIMEOUT     # 布局和超时参数
 
@@ -46,6 +46,7 @@ utils.py — 工具函数层
 git_manager.py — Git 逻辑层
 └── GitManager
     ├── log()            # 结构化日志：(timestamp, level, message) 元组
+    ├── action()         # 上下文管理器：进入时记录"正在"，退出时原地替换为"完成"或"失败"
     ├── get_status()     # 获取仓库状态（分支、远程地址）
     ├── init_repo()      # 初始化 Git 仓库
     ├── configure_remote()  # 自动配置远程仓库（基于 GitHub 用户名 + 目录名）
@@ -176,13 +177,13 @@ python -m src
 ### 错误处理
 - 子进程错误通过 `run_command()` 统一捕获，合并 stdout 和 stderr 返回
 - `GitManager._parse_push_error()` 将 Git 推送错误翻译为中文提示，大小写不敏感匹配关键词：
-  - `recv failure` / `connection` / `failed to connect` → 网络连接失败
-  - `could not resolve host` → DNS 解析失败
+  - `recv failure` / `connection` / `failed to connect` → 网络连接异常
+  - `could not resolve host` → DNS 解析异常
   - `timeout` → 连接超时
-  - `authentication failed` / `403` → 认证失败
+  - `authentication failed` / `403` → 认证异常
   - `repository not found` / `404` → 仓库不存在
   - `rejected` + `non-fast-forward` → 推送被拒绝
-  - `schannel` / `certificate` / `ssl` → SSL 证书验证失败
+  - `schannel` / `certificate` / `ssl` → SSL 证书验证异常
   - `everything up-to-date` → 无需推送
 - 无法识别的错误回退显示原始英文信息
 - Release 发布失败不阻塞同步主流程

@@ -4,6 +4,13 @@ import time
 import tempfile
 from datetime import datetime
 from .utils import run_command
+from contextlib import contextmanager
+
+
+class _ActionResult:
+    def __init__(self):
+        self.failed = False
+        self.detail = None
 
 
 class GitManager:
@@ -14,11 +21,27 @@ class GitManager:
         self.frozen_changes = None
         self.updated_items = {}
 
-    def log(self, msg, type="INFO"):
+    def log(self, msg, type="NOTE"):
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.logs.append((timestamp, type, msg))
         if self.on_log:
             self.on_log()
+
+    @contextmanager
+    def action(self, msg):
+        idx = len(self.logs)
+        self.log(msg, "ACTION")
+        result = _ActionResult()
+        try:
+            yield result
+        finally:
+            ts, _, orig_msg = self.logs[idx]
+            new_ts = datetime.now().strftime("%H:%M:%S")
+            level = "FAIL" if result.failed else "DONE"
+            detail = f": {result.detail}" if result.detail else ""
+            self.logs[idx] = (new_ts, level, f"{orig_msg}{detail}")
+            if self.on_log:
+                self.on_log()
 
     def get_status(self):
         if not os.path.exists(os.path.join(self.cwd, ".git")):
@@ -44,12 +67,11 @@ class GitManager:
         }
 
     def init_repo(self):
-        self.log("正在初始化 Git 仓库", "INFO")
-        s, m = run_command("git init", cwd=self.cwd)
-        if s:
-            self.log("Git 仓库初始化成功", "SUCCESS")
-        else:
-            self.log(f"初始化失败: {m}", "ERROR")
+        with self.action("初始化 Git 仓库") as result:
+            s, m = run_command("git init", cwd=self.cwd)
+            if not s:
+                result.failed = True
+                result.detail = m
 
     def create_ignore(self):
         gitignore_path = os.path.join(self.cwd, ".gitignore")
@@ -57,12 +79,13 @@ class GitManager:
             return
 
         content = "__pycache__/\n*.pyc\n.env\n.DS_Store\n.vscode/\n.idea/\ndist/\nbuild/\n*.spec\nvenv/\nrun_sync.bat\n"
-        try:
-            with open(gitignore_path, "w", encoding="utf-8") as f:
-                f.write(content)
-            self.log("默认 .gitignore 创建成功", "SUCCESS")
-        except Exception as e:
-            self.log(f"创建失败: {e}", "ERROR")
+        with self.action("创建 .gitignore") as result:
+            try:
+                with open(gitignore_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+            except Exception as e:
+                result.failed = True
+                result.detail = str(e)
 
     def get_github_username(self):
         s, m = run_command("gh api user -q .login")
@@ -138,7 +161,7 @@ class GitManager:
         if prev_prefix == current_prefix:
             next_char = chr(ord(prev_seq) + 1)
             if next_char > 'z':
-                self.log("版本序列已达上限 z，将使用 z", "WARN")
+                self.log("版本序列已达上限 z，将使用 z", "NOTE")
                 next_char = 'z'
             return f"{current_prefix}{next_char}"
         else:
@@ -149,12 +172,14 @@ class GitManager:
         if not os.path.exists(releases_path):
             return
 
-        try:
-            with open(releases_path, "r", encoding="utf-8") as f:
-                body = f.read().strip()
-        except OSError as e:
-            self.log(f"读取 changelog.md 失败: {e}", "ERROR")
-            return
+        with self.action("读取 changelog.md") as result:
+            try:
+                with open(releases_path, "r", encoding="utf-8") as f:
+                    body = f.read().strip()
+            except OSError as e:
+                result.failed = True
+                result.detail = str(e)
+                return
 
         if not body:
             return
@@ -162,7 +187,7 @@ class GitManager:
         tag = self.calculate_next_version()
         repo_slug = self.get_repo_slug()
         if not repo_slug:
-            self.log("无法获取仓库信息，跳过 Release 发布", "WARN")
+            self.log("跳过 Release 发布", "NOTE")
             return
 
         tmp_file = None
@@ -171,31 +196,31 @@ class GitManager:
                 f.write(body)
                 tmp_file = f.name
 
-            self.log(f"正在发布 Release {tag}", "INFO")
-            s, m = run_command(f'gh release create {tag} --repo {repo_slug} --target main --notes-file "{tmp_file}"')
-
-            if s:
-                self.log("发布成功", "SUCCESS")
-            elif "already exist" in m.lower():
-                self.log("正在更新 Release", "INFO")
-                s, m = run_command(f'gh release edit {tag} --repo {repo_slug} --notes-file "{tmp_file}"')
+            with self.action(f"发布 Release {tag}") as result:
+                s, m = run_command(f'gh release create {tag} --repo {repo_slug} --target main --notes-file "{tmp_file}"')
                 if s:
-                    self.log("发布成功", "SUCCESS")
+                    pass
+                elif "already exist" in m.lower():
+                    with self.action("更新 Release") as update_result:
+                        s, m = run_command(f'gh release edit {tag} --repo {repo_slug} --notes-file "{tmp_file}"')
+                        if not s:
+                            update_result.failed = True
+                            update_result.detail = m
+                            return
                 else:
-                    self.log(f"Release 更新失败: {m}", "ERROR")
+                    result.failed = True
+                    result.detail = m
                     return
-            else:
-                self.log(f"Release 发布失败: {m}", "ERROR")
-                return
 
-            try:
-                os.remove(releases_path)
-                self.log("删除成功 changelog.md", "INFO")
-            except OSError as e:
-                self.log(f"删除 changelog.md 失败: {e}", "WARN")
+            with self.action("删除 changelog.md") as result:
+                try:
+                    os.remove(releases_path)
+                except OSError as e:
+                    result.failed = True
+                    result.detail = str(e)
 
         except Exception as e:
-            self.log(f"Release 发布异常: {e}", "ERROR")
+            self.log(f"Release 发布异常: {e}", "NOTE")
         finally:
             if tmp_file and os.path.exists(tmp_file):
                 try:
@@ -209,18 +234,18 @@ class GitManager:
         url = f"https://github.com/{username}/{repo_name}" if username else ""
 
         if not url:
-            self.log("无法获取 GitHub 用户名，远程仓库未配置", "WARN")
+            self.log("无法获取 GitHub 用户名", "NOTE")
             return
 
-        self.log(f"正在配置远程仓库: {url}", "INFO")
-        s, m = run_command(f"git remote add origin {url}", cwd=self.cwd)
-        if not s:
-            s, m = run_command(f"git remote set-url origin {url}", cwd=self.cwd)
-
-        if s:
-            self.log(f"远程仓库设置成功: {url}", "SUCCESS")
-        else:
-            self.log(f"设置远程失败: {m}", "ERROR")
+        with self.action("配置远程仓库") as result:
+            s, m = run_command(f"git remote add origin {url}", cwd=self.cwd)
+            if not s:
+                s, m = run_command(f"git remote set-url origin {url}", cwd=self.cwd)
+            if s:
+                result.detail = url
+            else:
+                result.failed = True
+                result.detail = m
 
     def sync(self):
         self.create_ignore()
@@ -230,11 +255,12 @@ class GitManager:
             self.init_repo()
             status = self.get_status()
 
-        self.log("正在扫描", "INFO")
-        s, m = run_command("git add .", cwd=self.cwd)
-        if not s:
-            self.log(f"文件暂存失败: {m}", "ERROR")
-            return
+        with self.action("扫描") as result:
+            s, m = run_command("git add .", cwd=self.cwd)
+            if not s:
+                result.failed = True
+                result.detail = f"文件暂存异常: {m}"
+                return
 
         s, st = run_command("git status --porcelain", cwd=self.cwd)
         self.updated_items = {}
@@ -253,20 +279,21 @@ class GitManager:
                         self.updated_items[name] = final_status
 
             msg = f"Update: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            self.log("正在提交", "INFO")
-            s, m = run_command(f'git commit -m "{msg}"', cwd=self.cwd)
-            if not s:
-                if "author identity" in m.lower() or "user.name" in m.lower():
-                    username = self.get_github_username() or "User"
-                    run_command(f'git config user.name "{username}"', cwd=self.cwd)
-                    run_command(f'git config user.email "{username}@users.noreply.github.com"', cwd=self.cwd)
-                    self.log(f"自动配置 Git 身份: {username}", "INFO")
-                    s, m = run_command(f'git commit -m "{msg}"', cwd=self.cwd)
+            with self.action("提交") as result:
+                s, m = run_command(f'git commit -m "{msg}"', cwd=self.cwd)
                 if not s:
-                    self.log(f"提交失败: {m}", "ERROR")
-                    return
+                    if "author identity" in m.lower() or "user.name" in m.lower():
+                        username = self.get_github_username() or "User"
+                        run_command(f'git config user.name "{username}"', cwd=self.cwd)
+                        run_command(f'git config user.email "{username}@users.noreply.github.com"', cwd=self.cwd)
+                        self.log(f"自动配置 Git 身份: {username}", "NOTE")
+                        s, m = run_command(f'git commit -m "{msg}"', cwd=self.cwd)
+                    if not s:
+                        result.failed = True
+                        result.detail = m
+                        return
         else:
-            self.log("没有更改需要提交", "INFO")
+            self.log("没有更改需要提交", "NOTE")
 
         if status["remote"] == "未配置":
             self.configure_remote()
@@ -275,36 +302,43 @@ class GitManager:
                 return
 
         run_command("git branch -M main", cwd=self.cwd)
-        self.log("正在推送 GitHub", "INFO")
-        s, m = run_command("git push -u origin main", cwd=self.cwd)
+        with self.action("推送 GitHub") as result:
+            s, m = run_command("git push -u origin main", cwd=self.cwd)
+            if not s:
+                result.failed = True
+                result.detail = m
 
         if s:
-            self.log("同步成功", "SUCCESS")
             self.publish_release()
         else:
             if "repository not found" in m.lower() or "does not exist" in m.lower() or "404" in m:
                 if self.create_github_repo():
-                    self.log("正在重新推送", "INFO")
-                    s, m = run_command("git push -u origin main", cwd=self.cwd)
+                    with self.action("重新推送") as result:
+                        s, m = run_command("git push -u origin main", cwd=self.cwd)
+                        if not s:
+                            result.failed = True
+                            result.detail = m
                     if s:
-                        self.log("同步成功", "SUCCESS")
                         self.publish_release()
                         return
 
             if "rejected" in m or "fetch first" in m:
-                self.log("检测到冲突，尝试自动合并", "WARN")
+                self.log("检测到冲突，尝试自动合并", "NOTE")
                 s_pull, m_pull = run_command("git pull origin main --rebase", cwd=self.cwd)
                 if s_pull:
-                    self.log("合并成功，重新推送", "INFO")
-                    s_push, m_push = run_command("git push -u origin main", cwd=self.cwd)
+                    self.log("合并成功，重新推送", "NOTE")
+                    with self.action("推送 GitHub") as result:
+                        s_push, m_push = run_command("git push -u origin main", cwd=self.cwd)
+                        if s_push:
+                            result.detail = "合并成功"
+                        else:
+                            result.failed = True
+                            result.detail = m_push
                     if s_push:
-                        self.log("同步成功 (合并成功)", "SUCCESS")
                         self.publish_release()
                         return
-                    else:
-                        self.log(f"合并后推送失败: {m_push}", "ERROR")
                 else:
-                    self.log("自动合并失败，尝试强制推送", "WARN")
+                    self.log("自动合并异常，尝试强制推送", "NOTE")
                     run_command("git rebase --abort", cwd=self.cwd)
 
             self.force_push()
@@ -321,27 +355,28 @@ class GitManager:
             url = "https://github.com/new"
 
         webbrowser.open(url)
-        self.log("等待仓库创建", "WARN")
 
-        remote_url = f"https://github.com/{username}/{repo_name}" if username else ""
-        if not remote_url:
-            self.log("无法确定仓库地址", "ERROR")
-            return False
+        with self.action("等待仓库创建") as result:
+            remote_url = f"https://github.com/{username}/{repo_name}" if username else ""
+            if not remote_url:
+                result.failed = True
+                result.detail = "无法确定仓库地址"
+                return False
 
-        max_wait = 300
-        waited = 0
-        while waited < max_wait:
-            time.sleep(3)
-            waited += 3
-            s, m = run_command(f'gh repo view {username}/{repo_name}')
-            if s:
-                self.log("检测到仓库创建成功", "SUCCESS")
-                break
-            if self.on_log:
-                self.on_log()
-        else:
-            self.log("等待仓库创建超时（5分钟）", "ERROR")
-            return False
+            max_wait = 300
+            waited = 0
+            while waited < max_wait:
+                time.sleep(3)
+                waited += 3
+                s, m = run_command(f'gh repo view {username}/{repo_name}')
+                if s:
+                    break
+                if self.on_log:
+                    self.on_log()
+            else:
+                result.failed = True
+                result.detail = "等待超时（5分钟）"
+                return False
 
         s, m = run_command(f"git remote add origin {remote_url}", cwd=self.cwd)
         if not s:
@@ -350,28 +385,28 @@ class GitManager:
         return True
 
     def force_push(self):
-        s, m = run_command("git push -u origin main --force", cwd=self.cwd)
+        with self.action("强制推送") as result:
+            s, m = run_command("git push -u origin main --force", cwd=self.cwd)
+            if not s:
+                result.failed = True
+                result.detail = self._parse_push_error(m)
         if s:
-            self.log("强制推送成功", "SUCCESS")
             self.publish_release()
-        else:
-            reason = self._parse_push_error(m)
-            self.log(f"推送失败：{reason}", "ERROR")
 
     def _parse_push_error(self, msg):
         m = msg.lower()
         if "recv failure" in m or "connection" in m or "failed to connect" in m:
-            return "网络连接失败，请检查网络或代理设置"
+            return "网络连接异常，请检查网络或代理设置"
         if "could not resolve host" in m:
-            return "DNS 解析失败，无法连接到 GitHub"
+            return "DNS 解析异常，无法连接到 GitHub"
         if "timeout" in m:
             return "连接超时，网络可能不稳定"
         if "authentication failed" in m or "403" in m:
-            return "认证失败，请检查 GitHub 登录状态"
+            return "认证异常，请检查 GitHub 登录状态"
         if "repository not found" in m or "404" in m:
             return "仓库不存在或没有访问权限"
         if "schannel" in m or "certificate" in m or "ssl" in m:
-            return "SSL 证书验证失败，请检查系统根证书或代理设置"
+            return "SSL 证书验证异常，请检查系统根证书或代理设置"
         if "rejected" in m and "non-fast-forward" in m:
             return "推送被拒绝，远程仓库有更新未同步"
         if "everything up-to-date" in m:

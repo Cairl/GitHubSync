@@ -108,7 +108,7 @@ class App:
                 self.selected_index = 0
 
         except Exception as e:
-            self.git.log(f"刷新文件列表失败: {e}", "ERROR")
+            self.git.log(f"刷新文件列表异常: {e}", "NOTE")
 
     def build_main_box(self):
         box_width = 60
@@ -364,37 +364,38 @@ class App:
             self.cooldown_until = time.time() + COOLDOWN_PERIOD
 
     def remove_from_github(self, item_name):
-        self.git.log(f"正在删除: {item_name}", "INFO")
+        with self.git.action(f"删除: {item_name}") as result:
+            s, m = run_command(f'git ls-files "{item_name}"', cwd=self.git.cwd)
+            if s and m.strip():
+                s, m = run_command(f'git rm -r --cached "{item_name}"', cwd=self.git.cwd)
+                if not s:
+                    result.failed = True
+                    result.detail = m
+                    return
 
-        s, m = run_command(f'git ls-files "{item_name}"', cwd=self.git.cwd)
-        if s and m.strip():
-            s, m = run_command(f'git rm -r --cached "{item_name}"', cwd=self.git.cwd)
-            if not s:
-                self.git.log(f"删除失败: {m}", "ERROR")
+            self.add_to_gitignore(item_name)
+            run_command('git add .gitignore', cwd=self.git.cwd)
+
+            msg = f"Delete: {item_name}"
+            s, m = run_command(f'git commit -m "{msg}"', cwd=self.git.cwd)
+            if not s and "nothing to commit" not in m.lower() and "no changes added to commit" not in m.lower():
+                result.failed = True
+                result.detail = m
                 return
 
-        self.add_to_gitignore(item_name)
-        run_command('git add .gitignore', cwd=self.git.cwd)
+            if s:
+                status = self.git.get_status()
+                branch = status.get("branch", "main")
+                if branch == "未知" or not branch:
+                    branch = "main"
 
-        msg = f"Delete: {item_name}"
-        s, m = run_command(f'git commit -m "{msg}"', cwd=self.git.cwd)
-        if not s and "nothing to commit" not in m.lower() and "no changes added to commit" not in m.lower():
-            self.git.log(f"提交失败: {m}", "ERROR")
-            return
-
-        if s:
-            status = self.git.get_status()
-            branch = status.get("branch", "main")
-            if branch == "未知" or not branch:
-                branch = "main"
-
-            s, m = run_command(f"git push origin {branch}", cwd=self.git.cwd)
-            if not s:
-                self.git.log(f"推送失败: {m}", "ERROR")
+                s, m = run_command(f"git push origin {branch}", cwd=self.git.cwd)
+                if not s:
+                    result.failed = True
+                    result.detail = m
 
         self.refresh_file_list()
         self.git.updated_items[item_name] = 'D'
-        self.git.log(f"删除成功: {item_name}", "SUCCESS")
 
     def add_to_gitignore(self, item_name):
         gitignore_path = os.path.join(self.git.cwd, ".gitignore")
@@ -402,58 +403,60 @@ class App:
             with open(gitignore_path, "a", encoding="utf-8") as f:
                 f.write(f"\n{item_name}\n")
         except Exception as e:
-            self.git.log(f"添加忽略失败: {e}", "ERROR")
+            self.git.log(f"添加忽略异常: {e}", "NOTE")
 
     def confirm_delete(self, item_name):
         path = os.path.join(self.git.cwd, item_name)
-        self.git.log(f"确定删除 '{item_name}' 吗？(按回车确认，Esc/Q 取消)", "WARN")
+        self.git.log(f"确定删除 '{item_name}' 吗？(按回车确认，Esc/Q 取消)", "NOTE")
         if self._live:
             self._live.update(self.build_screen())
 
         key = get_key()
         if key == KEY_ENTER:
-            try:
-                if os.path.isdir(path):
-                    shutil.rmtree(path)
-                else:
-                    os.remove(path)
-                self.git.log(f"从本地磁盘物理删除成功: {item_name}", "SUCCESS")
-                self.refresh_file_list()
-            except Exception as e:
-                self.git.log(f"物理删除失败: {e}", "ERROR")
+            with self.git.action(f"物理删除: {item_name}") as result:
+                try:
+                    if os.path.isdir(path):
+                        shutil.rmtree(path)
+                    else:
+                        os.remove(path)
+                    self.refresh_file_list()
+                except Exception as e:
+                    result.failed = True
+                    result.detail = str(e)
         else:
-            self.git.log("取消删除操作", "INFO")
+            self.git.log("取消删除操作", "NOTE")
 
     def push_to_github(self, item_name):
-        self.git.log(f"正在推送: {item_name}", "INFO")
+        with self.git.action(f"推送: {item_name}") as result:
+            self.remove_from_gitignore(item_name)
+            run_command('git add .gitignore', cwd=self.git.cwd)
+            run_command(f'git add "{item_name}"', cwd=self.git.cwd)
 
-        self.remove_from_gitignore(item_name)
-        run_command('git add .gitignore', cwd=self.git.cwd)
-        run_command(f'git add "{item_name}"', cwd=self.git.cwd)
+            msg = f"Add: {item_name}"
+            s, m = run_command(f'git commit -m "{msg}"', cwd=self.git.cwd)
+            if not s and "nothing to commit" not in m.lower() and "no changes added to commit" not in m.lower():
+                result.failed = True
+                result.detail = m
+                self.refresh_file_list()
+                return
 
-        msg = f"Add: {item_name}"
-        s, m = run_command(f'git commit -m "{msg}"', cwd=self.git.cwd)
-        if not s and "nothing to commit" not in m.lower() and "no changes added to commit" not in m.lower():
-            self.git.log(f"提交失败: {m}", "ERROR")
-            self.refresh_file_list()
-            return
+            if not s:
+                result.failed = True
+                result.detail = "没有新文件需要推送"
+                self.refresh_file_list()
+                return
 
-        if not s:
-            self.git.log("没有新文件需要推送", "WARN")
-            self.refresh_file_list()
-            return
+            status = self.git.get_status()
+            branch = status.get("branch", "main")
+            if branch == "未知" or not branch:
+                branch = "main"
 
-        status = self.git.get_status()
-        branch = status.get("branch", "main")
-        if branch == "未知" or not branch:
-            branch = "main"
-
-        s, m = run_command(f"git push origin {branch}", cwd=self.git.cwd)
-        if s:
-            self.git.log(f"推送成功: {item_name}", "SUCCESS")
-            self.git.updated_items[item_name] = 'A'
-        else:
-            self.git.log(f"推送失败: {m}", "ERROR")
+            s, m = run_command(f"git push origin {branch}", cwd=self.git.cwd)
+            if s:
+                self.git.updated_items[item_name] = 'A'
+            else:
+                result.failed = True
+                result.detail = m
 
         self.refresh_file_list()
 
@@ -466,7 +469,7 @@ class App:
             with open(gitignore_path, "w", encoding="utf-8") as f:
                 f.writelines(new_lines)
         except Exception as e:
-            self.git.log(f"移除忽略失败: {e}", "ERROR")
+            self.git.log(f"移除忽略异常: {e}", "NOTE")
 
     def open_remote(self):
         import webbrowser
@@ -475,10 +478,11 @@ class App:
             remote_url = status["remote"]
             if not remote_url.startswith("http"):
                 remote_url = f"https://{remote_url.replace('git@', '').replace(':', '/')}"
-            webbrowser.open(remote_url)
-            self.git.log(f"打开成功: {remote_url}", "SUCCESS")
+            with self.git.action("打开远程仓库") as result:
+                result.detail = remote_url
+                webbrowser.open(remote_url)
         else:
-            self.git.log("未配置远程仓库", "WARN")
+            self.git.log("未配置远程仓库", "NOTE")
 
     def run(self):
         enable_vt100()

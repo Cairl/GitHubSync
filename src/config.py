@@ -20,17 +20,17 @@ STYLE_LOG_WARN    = Style(color="#F9E2AF", bold=True)
 STYLE_LOG_INFO    = Style(color="#89B4FA", bold=True)
 
 LEVEL_STYLES = {
-    "SUCCESS": STYLE_LOG_SUCCESS,
-    "ERROR": STYLE_LOG_ERROR,
-    "WARN": STYLE_LOG_WARN,
-    "INFO": STYLE_LOG_INFO,
+    "ACTION": STYLE_LOG_INFO,
+    "DONE": STYLE_LOG_SUCCESS,
+    "FAIL": STYLE_LOG_ERROR,
+    "NOTE": STYLE_LOG_WARN,
 }
 
 LEVEL_LABELS = {
-    "SUCCESS": "成功",
-    "ERROR": "错误",
-    "WARN": "警告",
-    "INFO": "信息",
+    "ACTION": "正在",
+    "DONE": "完成",
+    "FAIL": "失败",
+    "NOTE": "注意",
 }
 
 # ─── 键盘扫描码 ───────
