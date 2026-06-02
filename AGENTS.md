@@ -2,7 +2,12 @@
 
 ## Project Overview
 
-GitHubSync 是一个 Windows 终端 TUI 工具，**仅支持上传操作**：将本地目录中的文件上传到 GitHub 仓库。基于 `git` 和 `gh` CLI 实现全部操作，使用 Rich 库渲染 TUI 界面。
+GitHubSync 是一个 Windows 终端 TUI 工具，将本地目录同步到 GitHub 仓库。基于 `git` 和 `gh` CLI 实现全部操作，使用 Rich 库渲染 TUI 界面。
+- 支持上传（推送新文件到 GitHub）和远端删除（从 GitHub 删除文件）
+- Release 发布：检测到 `changelog.md` 时自动发布 GitHub Release 并删除本地文件
+- 自动创建仓库、自动配置远程、冲突时强制推送
+
+
 
 - **语言**: Python 3.12+
 - **版本**: 2.0.0（定义于 `src/__init__.py`）
@@ -52,9 +57,13 @@ git_manager.py — Git 逻辑层
     ├── create_ignore()     # 创建默认 .gitignore
     ├── get_github_username() # 获取 GitHub 用户名（gh api → git remote → 邻近仓库）
     ├── get_repo_slug()     # 获取仓库 slug（owner/repo）
-    ├── get_latest_release() # 获取最新 Release 标签名（仅显示，不发布）
+    ├── get_latest_release() # 获取最新 Release 标签名
+    ├── calculate_next_version() # 计算下一版本号（YYwWWa 格式，周内递增字母）
     ├── configure_remote()  # 自动配置远程仓库（基于 GitHub 用户名 + 目录名，无交互）
-    ├── sync()              # 初始同步：扫描→暂存→提交→推送（无冲突合并处理，失败报错）
+    ├── sync()              # 核心同步流程：扫描→暂存→提交→推送→发布Release
+    ├── create_github_repo() # 创建 GitHub 仓库（浏览器 + 轮询检测）
+    ├── force_push()        # 强制推送（含错误解析）
+    ├── publish_release()   # 发布 GitHub Release
     └── _parse_push_error() # 推送错误中文翻译（所有推送失败统一调用）
 
 app.py — TUI 应用层
@@ -66,10 +75,14 @@ app.py — TUI 应用层
     ├── build_main_box()    # 构建统一圆角框（状态 + 倒计时 + 文件列表）
     ├── build_log_text()    # 构建日志文本（无边框）
     ├── build_screen()      # 组合完整屏幕（Group）
-    ├── handle_key()        # 按键分发（仅上下选择 + Enter推送）
-    ├── refresh_file_list() # 扫描目录生成文件列表（全部可推送）
+    ├── handle_key()        # 按键分发
+    ├── refresh_file_list() # 扫描目录生成文件列表
+    ├── execute_action()    # 执行删除/推送操作
+    ├── remove_from_github() # 从 GitHub 删除文件（git rm + gitignore + push）
     ├── push_to_github()    # 推送文件到 GitHub（移除 gitignore + add + commit + push）
+    ├── add_to_gitignore()  # 添加条目到 .gitignore
     ├── remove_from_gitignore() # 从 .gitignore 移除条目
+    ├── confirm_delete()    # 物理删除确认对话框
     ├── open_remote()       # 在浏览器中打开远程仓库
     └── run()               # 主循环（Rich Live + msvcrt 按键 + 60s 倒计时）
 ```
@@ -114,7 +127,9 @@ python -m src
 | 按键 | 功能 |
 |---|---|
 | `↑` `↓` | 切换选中文件 |
-| `Enter` | 推送选中文件到 GitHub |
+| `←` `→` | 切换焦点（文件名 / 操作按钮） |
+| `Enter` | 执行操作（焦点在操作按钮时）或切换到操作按钮（焦点在文件名时） |
+| `Esc` / `Q` | 取消确认对话框 |
 | `O` | 在浏览器中打开远程仓库 |
 
 - 60 秒无操作自动退出
@@ -136,7 +151,8 @@ python -m src
 - 应用启动后立即显示菜单，同步过程日志实时显示在底部
 - 日志区域显示最近的操作记录（同步、推送、删除等），按时间倒序
 - 状态面板显示当前分支、远程仓库地址（可点击跳转）、最新 Release 版本
-- 文件列表每项旁显示 `[推送]` 按钮，选中后按 Enter 即可上传到 GitHub
+- 文件列表中带 `(已忽略)` 标签的表示已被 `.gitignore` 排除，不会被同步
+- 推送操作：按 `→` 切换焦点到操作按钮，按 `Enter` 执行；非忽略文件执行删除（从 GitHub 远程删除），已忽略文件执行推送（上传到 GitHub）
 
 ## Testing Instructions
 
@@ -145,7 +161,7 @@ python -m src
 - 验证关注点：
   - 首次运行应自动初始化 Git 仓库并创建 `.gitignore`
   - 文件列表正确显示目录内容
-  - 推送操作正确执行
+  - 删除/推送操作正确执行
   - 错误信息正确显示中文翻译
   - 60 秒倒计时自动退出
 

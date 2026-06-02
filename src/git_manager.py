@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import tempfile
 from datetime import datetime
 from .utils import run_command
 from contextlib import contextmanager
@@ -139,6 +140,94 @@ class GitManager:
                 return parts[0]
         return None
 
+    def calculate_next_version(self):
+        latest = self.get_latest_release()
+        now = datetime.now()
+        yy = now.strftime("%y")
+        iso_cal = now.isocalendar()
+        week = iso_cal[1]
+        current_prefix = f"{yy}w{week:02d}"
+
+        if not latest:
+            return f"{current_prefix}a"
+
+        m = re.match(r'^(\d{2}w\d{2})([a-z])$', latest)
+        if not m:
+            return f"{current_prefix}a"
+
+        prev_prefix = m.group(1)
+        prev_seq = m.group(2)
+
+        if prev_prefix == current_prefix:
+            next_char = chr(ord(prev_seq) + 1)
+            if next_char > 'z':
+                self.log("版本序列已达上限 z，将使用 z", "NOTE")
+                next_char = 'z'
+            return f"{current_prefix}{next_char}"
+        else:
+            return f"{current_prefix}a"
+
+    def publish_release(self):
+        releases_path = os.path.join(self.cwd, "changelog.md")
+        if not os.path.exists(releases_path):
+            return
+
+        with self.action("读取 changelog.md") as result:
+            try:
+                with open(releases_path, "r", encoding="utf-8") as f:
+                    body = f.read().strip()
+            except OSError as e:
+                result.failed = True
+                result.detail = str(e)
+                return
+
+        if not body:
+            return
+
+        tag = self.calculate_next_version()
+        repo_slug = self.get_repo_slug()
+        if not repo_slug:
+            self.log("跳过 Release 发布", "NOTE")
+            return
+
+        tmp_file = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as f:
+                f.write(body)
+                tmp_file = f.name
+
+            with self.action(f"发布 Release {tag}") as result:
+                s, m = run_command(f'gh release create {tag} --repo {repo_slug} --target main --notes-file "{tmp_file}"')
+                if s:
+                    pass
+                elif "already exist" in m.lower():
+                    with self.action("更新 Release") as update_result:
+                        s, m = run_command(f'gh release edit {tag} --repo {repo_slug} --notes-file "{tmp_file}"')
+                        if not s:
+                            update_result.failed = True
+                            update_result.detail = m
+                            return
+                else:
+                    result.failed = True
+                    result.detail = m
+                    return
+
+            with self.action("删除 changelog.md") as result:
+                try:
+                    os.remove(releases_path)
+                except OSError as e:
+                    result.failed = True
+                    result.detail = str(e)
+
+        except Exception as e:
+            self.log(f"Release 发布异常: {e}", "NOTE")
+        finally:
+            if tmp_file and os.path.exists(tmp_file):
+                try:
+                    os.remove(tmp_file)
+                except OSError:
+                    pass
+
     def configure_remote(self):
         username = self.get_github_username()
         repo_name = os.path.basename(self.cwd)
@@ -218,6 +307,72 @@ class GitManager:
             if not s:
                 result.failed = True
                 result.detail = self._parse_push_error(m)
+
+        if s:
+            self.publish_release()
+        else:
+            if "repository not found" in m.lower() or "does not exist" in m.lower() or "404" in m:
+                if self.create_github_repo():
+                    with self.action("重新推送") as result:
+                        s, m = run_command("git push -u origin main", cwd=self.cwd)
+                        if not s:
+                            result.failed = True
+                            result.detail = m
+                    if s:
+                        self.publish_release()
+                        return
+
+            self.force_push()
+
+    def create_github_repo(self):
+        import webbrowser
+
+        repo_name = os.path.basename(self.cwd)
+        username = self.get_github_username()
+
+        if username:
+            url = f"https://github.com/new?name={repo_name}"
+        else:
+            url = "https://github.com/new"
+
+        webbrowser.open(url)
+
+        with self.action("等待仓库创建") as result:
+            remote_url = f"https://github.com/{username}/{repo_name}" if username else ""
+            if not remote_url:
+                result.failed = True
+                result.detail = "无法确定仓库地址"
+                return False
+
+            max_wait = 300
+            waited = 0
+            while waited < max_wait:
+                time.sleep(3)
+                waited += 3
+                s, m = run_command(f'gh repo view {username}/{repo_name}')
+                if s:
+                    break
+                if self.on_log:
+                    self.on_log()
+            else:
+                result.failed = True
+                result.detail = "等待超时（5分钟）"
+                return False
+
+        s, m = run_command(f"git remote add origin {remote_url}", cwd=self.cwd)
+        if not s:
+            run_command(f"git remote set-url origin {remote_url}", cwd=self.cwd)
+
+        return True
+
+    def force_push(self):
+        with self.action("强制推送") as result:
+            s, m = run_command("git push -u origin main --force", cwd=self.cwd)
+            if not s:
+                result.failed = True
+                result.detail = self._parse_push_error(m)
+        if s:
+            self.publish_release()
 
     def _parse_push_error(self, msg):
         m = msg.lower()

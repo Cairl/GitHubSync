@@ -11,9 +11,9 @@ from rich.style import Style
 
 from .config import (
     STYLE_BOLD, STYLE_DIM, STYLE_RED, STYLE_GREEN, STYLE_YELLOW,
-    STYLE_BLUE, STYLE_GRAY, STYLE_WHITE, STYLE_SELECTED,
+    STYLE_BLUE, STYLE_GRAY, STYLE_WHITE, STYLE_STRIKE, STYLE_SELECTED,
     STYLE_LINK, LEVEL_STYLES, LEVEL_LABELS,
-    KEY_UP, KEY_DOWN, KEY_ENTER, KEY_O,
+    KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_ENTER, KEY_ESC, KEY_Q, KEY_O,
     IDLE_TIMEOUT, COOLDOWN_PERIOD, STATUS_PANEL_HEIGHT, LOG_PANEL_HEIGHT,
 )
 from .utils import enable_vt100, run_command, get_key, get_display_width
@@ -26,6 +26,7 @@ class App:
         self.console = Console()
         self.running = True
         self.selected_index = 0
+        self.action_index = 0
         self.file_items = []
         self.first_sync_done = False
         self.timeout_seconds = IDLE_TIMEOUT
@@ -75,14 +76,32 @@ class App:
             dirs.sort()
             files.sort()
 
+            gitignore_path = os.path.join(self.git.cwd, ".gitignore")
+            ignored_items = set()
+            if os.path.exists(gitignore_path):
+                with open(gitignore_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#"):
+                            ignored_items.add(line.rstrip("/"))
+
             for name in dirs + files:
+                ignored = name in ignored_items
+                action_text = "推送" if ignored else "删除"
+                tag_text = "(已忽略)" if ignored else ""
                 self.file_items.append({
                     "name": name,
+                    "ignored": ignored,
+                    "action_text": action_text,
+                    "tag_text": tag_text,
                 })
 
             if not self.file_items:
                 self.file_items.append({
                     "name": "(空目录)",
+                    "ignored": False,
+                    "action_text": "",
+                    "tag_text": "",
                 })
 
             if self.selected_index >= len(self.file_items):
@@ -205,11 +224,18 @@ class App:
                 status_char = self.git.updated_items.get(name)
                 if status_char == 'A':
                     line.append("[+]", style=STYLE_GREEN)
+                elif status_char == 'D':
+                    line.append("[-]", style=STYLE_RED)
                 else:
                     line.append("   ")
 
                 if is_selected:
-                    name_style = STYLE_SELECTED
+                    if item["ignored"]:
+                        name_style = Style(bgcolor="#31748F", bold=True, color="#CDD6F4", strike=True)
+                    else:
+                        name_style = STYLE_SELECTED
+                elif item["ignored"]:
+                    name_style = STYLE_STRIKE
                 else:
                     name_style = STYLE_WHITE
                 line.append(f" {name}", style=name_style)
@@ -217,13 +243,18 @@ class App:
                 line.append(" " * name_pad, style=name_style if is_selected else None)
                 line.append(" ", style=name_style if is_selected else None)
 
-                if is_selected:
-                    line.append("  ")
-                    line.append(" 推送 ", style=Style(
-                        bgcolor="#31748F", bold=True, color="#A6E3A1"
+                if is_selected and self.action_index == 1:
+                    action_color = STYLE_GREEN if item["ignored"] else STYLE_RED
+                    line.append(f"  ")
+                    line.append(f" {item['action_text']} ", style=Style(
+                        bgcolor="#31748F", bold=True,
+                        color=action_color.color if action_color.color else "#CDD6F4"
                     ))
                 else:
-                    line.append("   推送 ", style=STYLE_DIM)
+                    line.append(f"   {item['action_text']} ", style=STYLE_DIM)
+
+                if item["tag_text"]:
+                    line.append(f" {item['tag_text']}", style=STYLE_DIM)
 
                 visible = get_display_width(line.plain)
                 padding = max(0, box_width - visible - 1)
@@ -296,55 +327,138 @@ class App:
         if key == KEY_UP:
             if self.file_items:
                 self.selected_index = (self.selected_index - 1) % len(self.file_items)
+                self.action_index = 0
         elif key == KEY_DOWN:
             if self.file_items:
                 self.selected_index = (self.selected_index + 1) % len(self.file_items)
+                self.action_index = 0
+        elif key == KEY_LEFT:
+            self.action_index = 0
+        elif key == KEY_RIGHT:
+            self.action_index = 1
         elif key == KEY_ENTER:
             if self.file_items and self.file_items[self.selected_index]["name"] != "(空目录)":
-                self.push_to_github(self.file_items[self.selected_index]["name"])
+                if self.action_index == 1:
+                    self.execute_action()
+                else:
+                    self.action_index = 1
                 self.deadline = time.time() + IDLE_TIMEOUT
         elif key == KEY_O or key == b"O":
             self.open_remote()
 
-    def push_to_github(self, item_name):
+    def execute_action(self):
+        item = self.file_items[self.selected_index]
+        item_name = item["name"]
+        if item_name == "(空目录)":
+            return
+
         self.operation_in_progress = True
         try:
-            with self.git.action(f"推送: {item_name}") as result:
-                self.remove_from_gitignore(item_name)
-                run_command('git add .gitignore', cwd=self.git.cwd)
-                run_command(f'git add "{item_name}"', cwd=self.git.cwd)
+            if item.get("ignored", False):
+                self.push_to_github(item_name)
+            else:
+                self.remove_from_github(item_name)
+        finally:
+            self._refresh_caches()
+            self.operation_in_progress = False
+            self.cooldown_until = time.time() + COOLDOWN_PERIOD
 
-                msg = f"Add: {item_name}"
-                s, m = run_command(f'git commit -m "{msg}"', cwd=self.git.cwd)
-                if not s and "nothing to commit" not in m.lower() and "no changes added to commit" not in m.lower():
-                    result.failed = True
-                    result.detail = m
-                    self.refresh_file_list()
-                    return
-
+    def remove_from_github(self, item_name):
+        with self.git.action(f"删除: {item_name}") as result:
+            s, m = run_command(f'git ls-files "{item_name}"', cwd=self.git.cwd)
+            if s and m.strip():
+                s, m = run_command(f'git rm -r --cached "{item_name}"', cwd=self.git.cwd)
                 if not s:
                     result.failed = True
-                    result.detail = "没有新文件需要推送"
-                    self.refresh_file_list()
+                    result.detail = m
                     return
 
+            self.add_to_gitignore(item_name)
+            run_command('git add .gitignore', cwd=self.git.cwd)
+
+            msg = f"Delete: {item_name}"
+            s, m = run_command(f'git commit -m "{msg}"', cwd=self.git.cwd)
+            if not s and "nothing to commit" not in m.lower() and "no changes added to commit" not in m.lower():
+                result.failed = True
+                result.detail = m
+                return
+
+            if s:
                 status = self.git.get_status()
                 branch = status.get("branch", "main")
                 if branch == "未知" or not branch:
                     branch = "main"
 
                 s, m = run_command(f"git push origin {branch}", cwd=self.git.cwd)
-                if s:
-                    self.git.updated_items[item_name] = 'A'
-                else:
-                    result.failed = True
-                    result.detail = self.git._parse_push_error(m)
+            if not s:
+                result.failed = True
+                result.detail = self.git._parse_push_error(m)
 
-            self.refresh_file_list()
-        finally:
-            self._refresh_caches()
-            self.operation_in_progress = False
-            self.cooldown_until = time.time() + COOLDOWN_PERIOD
+        self.refresh_file_list()
+        self.git.updated_items[item_name] = 'D'
+
+    def add_to_gitignore(self, item_name):
+        gitignore_path = os.path.join(self.git.cwd, ".gitignore")
+        try:
+            with open(gitignore_path, "a", encoding="utf-8") as f:
+                f.write(f"\n{item_name}\n")
+        except Exception as e:
+            self.git.log(f"添加忽略异常: {e}", "NOTE")
+
+    def confirm_delete(self, item_name):
+        path = os.path.join(self.git.cwd, item_name)
+        self.git.log(f"确定删除 '{item_name}' 吗？(按回车确认，Esc/Q 取消)", "NOTE")
+        if self._live:
+            self._live.update(self.build_screen())
+
+        key = get_key()
+        if key == KEY_ENTER:
+            with self.git.action(f"物理删除: {item_name}") as result:
+                try:
+                    if os.path.isdir(path):
+                        shutil.rmtree(path)
+                    else:
+                        os.remove(path)
+                    self.refresh_file_list()
+                except Exception as e:
+                    result.failed = True
+                    result.detail = str(e)
+        else:
+            self.git.log("取消删除操作", "NOTE")
+
+    def push_to_github(self, item_name):
+        with self.git.action(f"推送: {item_name}") as result:
+            self.remove_from_gitignore(item_name)
+            run_command('git add .gitignore', cwd=self.git.cwd)
+            run_command(f'git add "{item_name}"', cwd=self.git.cwd)
+
+            msg = f"Add: {item_name}"
+            s, m = run_command(f'git commit -m "{msg}"', cwd=self.git.cwd)
+            if not s and "nothing to commit" not in m.lower() and "no changes added to commit" not in m.lower():
+                result.failed = True
+                result.detail = m
+                self.refresh_file_list()
+                return
+
+            if not s:
+                result.failed = True
+                result.detail = "没有新文件需要推送"
+                self.refresh_file_list()
+                return
+
+            status = self.git.get_status()
+            branch = status.get("branch", "main")
+            if branch == "未知" or not branch:
+                branch = "main"
+
+            s, m = run_command(f"git push origin {branch}", cwd=self.git.cwd)
+            if s:
+                self.git.updated_items[item_name] = 'A'
+            else:
+                result.failed = True
+                result.detail = self.git._parse_push_error(m)
+
+        self.refresh_file_list()
 
     def remove_from_gitignore(self, item_name):
         gitignore_path = os.path.join(self.git.cwd, ".gitignore")
