@@ -25,7 +25,7 @@ class App:
         self.git = GitManager(repo_path, on_log=self._on_git_log)
         self.console = Console()
         self.running = True
-        self.mode = -1                  # -1=未选择, 0=推送模式, 1=恢复模式
+        self.mode = 0                   # 0=推送模式, 1=恢复模式（默认光标在推送）
         self.mode_locked = False
         self.selected_index = 0
         self.action_index = 0
@@ -182,10 +182,10 @@ class App:
 
         lines.append(Text(f"├{H * (box_width - 2)}┤", style=STYLE_DEFAULT))
 
-        # ── 模式选择提示（未选择时显示）──
+        # ── 模式选择提示（未锁定时显示）──
         if not self.mode_locked:
             hint_text = Text()
-            hint_text.append("  请按 ◀ 或 ▶ 键选择模式", style=STYLE_YELLOW)
+            hint_text.append("  ◀ ▶ 选择模式，回车确认", style=STYLE_YELLOW)
             self._add_box_line(lines, hint_text, box_width, V)
             lines.append(Text(f"├{H * (box_width - 2)}┤", style=STYLE_DEFAULT))
 
@@ -440,24 +440,19 @@ class App:
         elif key == KEY_LEFT:
             if not self.mode_locked and self.mode != 0:
                 self.mode = 0
-                self.mode_locked = True
-                self.selected_index = 0
-                self.action_index = 0
-                self._on_mode_selected()
         elif key == KEY_RIGHT:
             if not self.mode_locked and self.mode != 1:
                 self.mode = 1
-                self.mode_locked = True
-                self.selected_index = 0
-                self.action_index = 0
                 if not self.release_items:
                     self.load_releases()
-                self._on_mode_selected()
             elif self.mode == 1 and self.mode_locked:
                 if self.release_items and self.release_items[0]["name"] != "(无版本)":
                     self.action_index = 1
         elif key == KEY_ENTER:
-            if self.mode == 0:
+            if not self.mode_locked:
+                self.mode_locked = True
+                self._on_mode_selected()
+            elif self.mode == 0:
                 if self.file_items and self.file_items[self.selected_index]["name"] != "(空目录)":
                     if self.action_index == 1:
                         self.execute_action()
