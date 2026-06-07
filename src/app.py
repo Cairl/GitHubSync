@@ -1,4 +1,4 @@
-import os
+﻿import os
 import sys
 import time
 import shutil
@@ -25,7 +25,8 @@ class App:
         self.git = GitManager(repo_path, on_log=self._on_git_log)
         self.console = Console()
         self.running = True
-        self.mode = 0                   # 0=推送模式, 1=恢复模式
+        self.mode = -1                  # -1=未选择, 0=推送模式, 1=恢复模式
+        self.mode_locked = False
         self.selected_index = 0
         self.action_index = 0
         self.file_items = []
@@ -127,14 +128,20 @@ class App:
             })
 
     def do_first_sync(self):
+        """基本初始化：创建 .gitignore、初始化仓库、配置远程，但不执行推送"""
         self.operation_in_progress = True
-        self.git.sync()
-        self.first_sync_done = True
-        self._refresh_caches()
-        self.operation_in_progress = False
-        self.cooldown_until = time.time() + COOLDOWN_PERIOD
+        try:
+            self.git.create_ignore()
+            status = self.git.get_status()
+            if not status["initialized"]:
+                self.git.init_repo()
+            status = self.git.get_status()
+            if status["remote"] == "未配置":
+                self.git.configure_remote()
+        finally:
+            self._refresh_caches()
+            self.operation_in_progress = False
         self.refresh_file_list()
-        self.deadline = time.time() + IDLE_TIMEOUT
 
     def build_main_box(self):
         box_width = 60
@@ -147,7 +154,7 @@ class App:
         lines.append(Text(f"{TL}{H * (box_width - 2)}{TR}", style=STYLE_DEFAULT))
 
         # ── 模式指示器 ──
-        mode_names = ["推送模式", "恢复模式"]
+        mode_names = ["推送模式  ◀", "▶  恢复模式"]
         left_hint = "◀ "
         right_hint = " ▶"
         inner_width = box_width - 2
@@ -164,7 +171,7 @@ class App:
             pad = each_mode_w - w
             pad_l = pad // 2
             pad_r = pad - pad_l
-            is_sel = (i == self.mode)
+            is_sel = (self.mode >= 0 and i == self.mode)
             s = style_sel if is_sel else STYLE_DEFAULT
             mode_line.append(" " * pad_l, style=s)
             mode_line.append(name, style=s)
@@ -174,6 +181,13 @@ class App:
         lines.append(mode_line)
 
         lines.append(Text(f"├{H * (box_width - 2)}┤", style=STYLE_DEFAULT))
+
+        # ── 模式选择提示（未选择时显示）──
+        if not self.mode_locked:
+            hint_text = Text()
+            hint_text.append("  请按 ◀ 或 ▶ 键选择模式", style=STYLE_YELLOW)
+            self._add_box_line(lines, hint_text, box_width, V)
+            lines.append(Text(f"├{H * (box_width - 2)}┤", style=STYLE_DEFAULT))
 
         # ── 状态区 ──
         status = self._get_status()
@@ -424,20 +438,22 @@ class App:
                 self.selected_index = (self.selected_index + 1) % len(items)
                 self.action_index = 0
         elif key == KEY_LEFT:
-            if self.mode != 0:
+            if not self.mode_locked and self.mode != 0:
                 self.mode = 0
+                self.mode_locked = True
                 self.selected_index = 0
                 self.action_index = 0
-            else:
-                self.action_index = 0
+                self._on_mode_selected()
         elif key == KEY_RIGHT:
-            if self.mode != 1:
+            if not self.mode_locked and self.mode != 1:
                 self.mode = 1
+                self.mode_locked = True
                 self.selected_index = 0
                 self.action_index = 0
                 if not self.release_items:
                     self.load_releases()
-            else:
+                self._on_mode_selected()
+            elif self.mode == 1 and self.mode_locked:
                 if self.release_items and self.release_items[0]["name"] != "(无版本)":
                     self.action_index = 1
         elif key == KEY_ENTER:
@@ -612,6 +628,24 @@ class App:
                 webbrowser.open(remote_url)
         else:
             self.git.log("未配置远程仓库", "NOTE")
+
+    def _on_mode_selected(self):
+        """模式选择后的初始化：推送模式执行 sync，恢复模式加载版本列表"""
+        if self.mode == 0:
+            # 推送模式：执行完整同步
+            self.operation_in_progress = True
+            try:
+                self.git.sync()
+            finally:
+                self.first_sync_done = True
+                self._refresh_caches()
+                self.operation_in_progress = False
+                self.cooldown_until = time.time() + COOLDOWN_PERIOD
+                self.refresh_file_list()
+                self.deadline = time.time() + IDLE_TIMEOUT
+        elif self.mode == 1:
+            # 恢复模式：加载版本列表（已在 handle_key 中完成）
+            pass
 
     def run(self):
         enable_vt100()
