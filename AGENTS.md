@@ -4,7 +4,7 @@
 
 GitHubSync 是一个 Windows 终端 TUI 工具，将本地目录同步到 GitHub 仓库。基于 `git` 和 `gh` CLI 实现全部操作，使用 Rich 库渲染 TUI 界面。
 - 推送模式：上传新文件到 GitHub 或从 GitHub 删除文件
-- 恢复模式：浏览历史 Release 版本，选择后回车恢复到指定版本
+- 恢复模式：浏览 Git 提交历史，选择后回车恢复到指定 commit
 - Release 发布：检测到 `changelog.md` 时自动发布 GitHub Release 并删除本地文件
 - 自动创建仓库、自动配置远程、冲突时强制推送
 
@@ -60,7 +60,9 @@ git_manager.py — Git 逻辑层
     ├── get_repo_slug()     # 获取仓库 slug（owner/repo）
     ├── get_latest_release() # 获取最新 Release 标签名
     ├── get_all_releases()   # 获取所有 Release 标签列表（最多 20 个）
+    ├── get_recent_commits() # 获取最近的 Git 提交历史（hash + 时间）
     ├── restore_to_tag()     # 恢复到指定 tag（fetch + reset --hard）
+    ├── restore_to_commit()  # 恢复到指定 commit（reset --hard）
     ├── calculate_next_version() # 计算下一版本号（YYwWWa 格式，周内递增字母）
     ├── configure_remote()  # 自动配置远程仓库（基于 GitHub 用户名 + 目录名，无交互）
     ├── sync()              # 核心同步流程：扫描→暂存→提交→推送→发布Release
@@ -72,26 +74,28 @@ git_manager.py — Git 逻辑层
 app.py — TUI 应用层
 └── App
     ├── mode                # 当前模式：0=推送模式, 1=恢复模式
+    ├── mode_locked         # 模式是否已锁定（回车确认后为 True）
     ├── _on_git_log()       # GitManager 日志回调，触发 Live 更新
     ├── _get_status()       # 获取缓存的状态（懒加载）
     ├── _get_release()      # 获取缓存的 Release 信息（懒加载）
     ├── _refresh_caches()   # 刷新状态和 Release 缓存
-    ├── load_releases()     # 加载 Release 列表（首次切换到恢复模式时调用）
-    ├── do_first_sync()     # 首次推送同步
+    ├── load_releases()     # 加载 Git 提交历史列表（恢复模式确认后调用）
+    ├── do_first_sync()     # 基本初始化（创建 .gitignore、init、配置 remote）
+    ├── _on_mode_selected() # 模式确认后的初始化（推送模式执行 sync，恢复模式加载提交历史）
     ├── build_main_box()    # 构建统一圆角框（模式切换 + 状态 + 列表）
     ├── build_log_text()    # 构建日志文本（无边框）
     ├── build_screen()      # 组合完整屏幕（Group）
     ├── handle_key()        # 按键分发（根据 mode 分流）
     ├── refresh_file_list() # 扫描目录生成文件列表
     ├── execute_action()    # 推送模式：执行删除/推送操作
-    ├── execute_restore()   # 恢复模式：恢复到选中的 Release 版本
+    ├── execute_restore()   # 恢复模式：恢复到选中的 commit
     ├── remove_from_github() # 从 GitHub 删除文件（git rm + gitignore + push）
     ├── push_to_github()    # 推送文件到 GitHub（移除 gitignore + add + commit + push）
     ├── add_to_gitignore()  # 添加条目到 .gitignore
     ├── remove_from_gitignore() # 从 .gitignore 移除条目
     ├── confirm_delete()    # 物理删除确认对话框
     ├── open_remote()       # 在浏览器中打开远程仓库
-    └── run()               # 主循环（Rich Live + msvcrt 按键 + 60s 倒计时）
+    └── run()               # 主循环（Rich Live + msvcrt 按键）
 ```
 
 ## Setup Commands
@@ -134,15 +138,15 @@ python -m src
 | 按键 | 功能 |
 |---|---|
 | `↑` `↓` | 切换选中项（文件 / 版本） |
-| `←` `→` | 切换模式（推送 / 恢复）或切换焦点到操作按钮 |
-| `Enter` | 执行操作（焦点在操作按钮时）或切换到操作按钮（焦点在名称时） |
+| `←` `→` | 移动模式光标（推送 / 恢复）或切换焦点到操作按钮 |
+| `Enter` | 确认模式选择（未锁定时）或执行操作（焦点在操作按钮时） |
 | `Esc` / `Q` | 取消确认对话框 |
 | `O` | 在浏览器中打开远程仓库 |
 
-- 60 秒无操作自动退出
 - 操作执行后有 1 秒冷却期，防止误触
 - 推送模式：左键重置焦点，右键切到操作按钮
 - 恢复模式：右键切到操作按钮，Enter 确认恢复
+- 模式选择：启动时默认光标在推送模式，左右键移动光标，回车确认后锁定
 
 ## Troubleshooting
 
@@ -157,12 +161,14 @@ python -m src
 
 ### 调试技巧
 
-- 应用启动后立即显示菜单，同步过程日志实时显示在底部
+- 应用启动后显示模式选择界面，默认光标在推送模式，左右键移动光标，回车确认
+- 确认模式后不可切换，推送模式执行同步，恢复模式加载提交历史
+- 同步过程日志实时显示在底部
 - 日志区域显示最近的操作记录（同步、推送、删除等），按时间倒序
 - 状态面板显示当前分支、远程仓库地址（可点击跳转）、最新 Release 版本
 - 文件列表中带 `(已忽略)` 标签的表示已被 `.gitignore` 排除，不会被同步
 - 推送操作：按 `→` 切换焦点到操作按钮，按 `Enter` 执行；非忽略文件执行删除（从 GitHub 远程删除），已忽略文件执行推送（上传到 GitHub）
-- 恢复操作：按 `←` `→` 切换到恢复模式，用 `↑` `↓` 选择版本，按 `→` 再 `Enter` 确认恢复
+- 恢复操作：按 `←` `→` 移动光标到恢复模式，按 `Enter` 确认，用 `↑` `↓` 选择 commit，按 `→` 再 `Enter` 确认恢复
 
 ## Testing Instructions
 
@@ -192,9 +198,12 @@ python -m src
 ### TUI 渲染规则
 - 使用 Rich `Live` 组件进行全屏渲染，`refresh_per_second=4`
 - 屏幕由 `Group` 组合：`build_main_box()`（统一圆角框）+ `build_log_text()`（无边框日志）
-- 圆角框宽度固定 60 字符，内部包含模式切换栏、状态行、倒计时条、列表
-- 模式切换栏：顶部 `◀ 推送模式 | 恢复模式 ▶`，左右键切换，高亮当前模式
-- 推送模式显示文件列表（带 [+] / [-] 状态标记），恢复模式显示 Release 版本列表
+- 圆角框宽度固定 60 字符，内部包含模式切换栏、状态行、列表
+- 模式切换栏：顶部 `推送模式 | 恢复模式`，左右键移动光标，回车确认后锁定
+- 状态区统一显示：项目、分支、远程、版本（两种模式相同）
+- 列表区与顶部菜单之间有横隔线分隔
+- 推送模式显示文件列表（带 [+] / [-] 状态标记），恢复模式显示 Git 提交历史列表
+- 恢复模式列表显示 commit hash 和提交时间
 - 文件列表 padding 通过 `get_display_width(line.plain)` 直接测量行宽，确保右边框对齐
 - 文件名等宽填充至 `max_name_width`，使操作文字垂直对齐
 - 滚动指示器 `...` 在文件列表超出可见区域时显示
