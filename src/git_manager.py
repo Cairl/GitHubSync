@@ -156,7 +156,7 @@ class GitManager:
 
     def get_recent_commits(self, limit=20):
         """获取最近的 git commits"""
-        s, m = run_command(f'git log --oneline -{limit} --format="%H %s"', cwd=self.cwd)
+        s, m = run_command(f'git log --oneline -{limit} --format="%H %ai"', cwd=self.cwd)
         if not s or not m:
             return []
         commits = []
@@ -164,9 +164,9 @@ class GitManager:
             if line.strip():
                 parts = line.split(" ", 1)
                 if len(parts) >= 2:
-                    commits.append({"hash": parts[0], "message": parts[1]})
+                    commits.append({"hash": parts[0], "time": parts[1][:19]})
                 elif len(parts) == 1:
-                    commits.append({"hash": parts[0], "message": ""})
+                    commits.append({"hash": parts[0], "time": ""})
         return commits
 
     def restore_to_tag(self, tag):

@@ -14,7 +14,7 @@ from .config import (
     STYLE_BLUE, STYLE_DEFAULT, STYLE_WHITE, STYLE_STRIKE, STYLE_SELECTED,
     STYLE_LINK, LEVEL_STYLES, LEVEL_LABELS,
     KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_ENTER, KEY_ESC, KEY_Q, KEY_O,
-    IDLE_TIMEOUT, COOLDOWN_PERIOD, STATUS_PANEL_HEIGHT, LOG_PANEL_HEIGHT,
+    COOLDOWN_PERIOD, STATUS_PANEL_HEIGHT, LOG_PANEL_HEIGHT,
 )
 from .utils import enable_vt100, run_command, get_key, get_display_width
 from .git_manager import GitManager
@@ -32,8 +32,6 @@ class App:
         self.file_items = []
         self.release_items = []
         self.first_sync_done = False
-        self.timeout_seconds = IDLE_TIMEOUT
-        self.deadline = time.time() + IDLE_TIMEOUT
         self.operation_in_progress = False
         self.cooldown_until = 0
         self._cached_status = None
@@ -119,13 +117,13 @@ class App:
         for commit in commits:
             self.release_items.append({
                 "name": commit["hash"][:8],
-                "message": commit["message"],
+                "time": commit["time"],
                 "action_text": "恢复",
             })
         if not self.release_items:
             self.release_items.append({
                 "name": "(无提交)",
-                "message": "",
+                "time": "",
                 "action_text": "",
             })
 
@@ -221,19 +219,6 @@ class App:
 
         self._add_box_line(lines, remote_line, box_width, V)
         self._add_box_line(lines, version_line, box_width, V)
-
-        # ── 计时器（仅推送模式且已同步）──
-        if self.mode == 0 and self.first_sync_done and self.file_items:
-            rem = max(0, min(box_width - 4, self.timeout_seconds))
-            elap = (box_width - 4) - rem
-            timer = Text()
-            timer.append(V, style=STYLE_DEFAULT)
-            timer.append(" ")
-            timer.append("─" * rem, style=STYLE_DIM)
-            timer.append("┄" * elap, style=STYLE_BLUE)
-            timer.append(" ")
-            timer.append(V, style=STYLE_DEFAULT)
-            lines.append(timer)
 
         # ── 列表区 ──
         if self.mode == 0:
@@ -339,9 +324,9 @@ class App:
                 if tag_text:
                     line.append(f" {tag_text}", style=STYLE_DIM)
 
-                # 恢复模式显示 commit message
-                if self.mode == 1 and item.get("message"):
-                    line.append(f"  {item['message']}", style=STYLE_DIM)
+                # 恢复模式显示 commit 时间
+                if self.mode == 1 and item.get("time"):
+                    line.append(f"  {item['time']}", style=STYLE_DIM)
 
                 visible = get_display_width(line.plain)
                 padding = max(0, box_width - visible - 1)
@@ -446,7 +431,6 @@ class App:
                         self.execute_action()
                     else:
                         self.action_index = 1
-                    self.deadline = time.time() + IDLE_TIMEOUT
             else:
                 if self.release_items and self.release_items[0]["name"] != "(无版本)":
                     if self.action_index == 1:
@@ -625,7 +609,6 @@ class App:
                 self.operation_in_progress = False
                 self.cooldown_until = time.time() + COOLDOWN_PERIOD
                 self.refresh_file_list()
-                self.deadline = time.time() + IDLE_TIMEOUT
         elif self.mode == 1:
             # 恢复模式：确认后才加载版本列表
             self.load_releases()
@@ -657,14 +640,9 @@ class App:
                         continue
 
                     key = get_key()
-                    self.deadline = time.time() + IDLE_TIMEOUT
                     self.handle_key(key)
                     live.update(self.build_screen())
                 else:
-                    remaining = self.deadline - time.time()
-                    self.timeout_seconds = max(0, round(remaining))
-                    if remaining < 0:
-                        self.running = False
                     live.update(self.build_screen())
                     time.sleep(0.05)
 
