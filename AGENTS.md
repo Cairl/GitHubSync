@@ -72,6 +72,9 @@ app.py — TUI 应用层
     ├── _get_status()       # 获取缓存的状态（懒加载）
     ├── _get_release()      # 获取缓存的 Release 信息（懒加载）
     ├── _refresh_caches()   # 刷新状态和 Release 缓存
+    ├── build_mode_selection_screen() # 构建模式选择界面（3行高按钮，左右键切换）
+    ├── handle_mode_key()     # 模式选择按键分发
+    ├── run_restore()         # 恢复模式：fetch + reset --hard 到远程最新
     ├── build_main_box()    # 构建统一圆角框（状态 + 倒计时 + 文件列表）
     ├── build_log_text()    # 构建日志文本（无边框）
     ├── build_screen()      # 组合完整屏幕（Group）

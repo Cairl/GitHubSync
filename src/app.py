@@ -11,7 +11,7 @@ from rich.style import Style
 
 from .config import (
     STYLE_BOLD, STYLE_DIM, STYLE_RED, STYLE_GREEN, STYLE_YELLOW,
-    STYLE_BLUE, STYLE_GRAY, STYLE_WHITE, STYLE_STRIKE, STYLE_SELECTED,
+    STYLE_BLUE, STYLE_DEFAULT, STYLE_WHITE, STYLE_STRIKE, STYLE_SELECTED,
     STYLE_LINK, LEVEL_STYLES, LEVEL_LABELS,
     KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_ENTER, KEY_ESC, KEY_Q, KEY_O,
     IDLE_TIMEOUT, COOLDOWN_PERIOD, STATUS_PANEL_HEIGHT, LOG_PANEL_HEIGHT,
@@ -25,6 +25,7 @@ class App:
         self.git = GitManager(repo_path, on_log=self._on_git_log)
         self.console = Console()
         self.running = True
+        self.mode_index = 0
         self.selected_index = 0
         self.action_index = 0
         self.file_items = []
@@ -110,6 +111,83 @@ class App:
         except Exception as e:
             self.git.log(f"刷新文件列表异常: {e}", "NOTE")
 
+    def build_mode_selection_screen(self):
+        cell_width = 12
+        total_inner = cell_width * 2 + 1
+        TL, TR = '╭', '╮'
+        BL, BR = '╰', '╯'
+        H, V = '─', '│'
+        style_sel = Style(bgcolor="#585B70", color="#CDD6F4", bold=True)
+
+        lines = []
+        lines.append(Text(f"{TL}{H * total_inner}{TR}", style=STYLE_DEFAULT))
+
+        title = Text("选择模式", style=Style(color="#CDD6F4", bold=True))
+        pad_total = total_inner - get_display_width(title.plain)
+        pad_left = pad_total // 2
+        pad_right = pad_total - pad_left
+        t = Text()
+        t.append(V, style=STYLE_DEFAULT)
+        t.append(" " * pad_left, style=STYLE_DEFAULT)
+        t.append(title)
+        t.append(" " * pad_right, style=STYLE_DEFAULT)
+        t.append(V, style=STYLE_DEFAULT)
+        lines.append(t)
+
+        lines.append(Text(f"├{H * cell_width}┬{H * cell_width}┤", style=STYLE_DEFAULT))
+
+        modes = ["同步模式", "恢复模式"]
+        for row in range(3):
+            line = Text()
+            line.append(V, style=STYLE_DEFAULT)
+            for i, name in enumerate(modes):
+                is_sel = (i == self.mode_index)
+                sel_style = style_sel if is_sel else STYLE_DEFAULT
+                if row == 1:
+                    pad_total = cell_width - get_display_width(name)
+                    pad_left = pad_total // 2
+                    pad_right = pad_total - pad_left
+                    line.append(" " * pad_left, style=sel_style)
+                    line.append(name, style=sel_style)
+                    line.append(" " * pad_right, style=sel_style)
+                else:
+                    line.append(" " * cell_width, style=sel_style)
+                if i == 0:
+                    line.append(V, style=STYLE_DEFAULT)
+            line.append(V, style=STYLE_DEFAULT)
+            lines.append(line)
+
+        lines.append(Text(f"{BL}{H * cell_width}┴{H * cell_width}{BR}", style=STYLE_DEFAULT))
+        return Group(*lines)
+
+    def handle_mode_key(self, key):
+        if key == KEY_LEFT:
+            self.mode_index = 0
+        elif key == KEY_RIGHT:
+            self.mode_index = 1
+        elif key == KEY_ENTER:
+            return True
+        return False
+
+    def run_restore(self):
+        self.git.log("开始从云端仓库恢复…", "ACTION")
+        status = self.git.get_status()
+        if not status["initialized"]:
+            self.git.log("Git 仓库未初始化", "FAIL")
+            return
+        branch = status.get("branch", "main")
+        if branch == "未知" or not branch:
+            branch = "main"
+        s, m = run_command(f"git fetch origin {branch}", cwd=self.git.cwd)
+        if not s:
+            self.git.log(f"拉取远程失败: {m}", "FAIL")
+            return
+        s, m = run_command(f"git reset --hard origin/{branch}", cwd=self.git.cwd)
+        if s:
+            self.git.log("所有文件已恢复到远程最新状态", "DONE")
+        else:
+            self.git.log(f"恢复失败: {m}", "FAIL")
+
     def build_main_box(self):
         box_width = 60
         TL, TR = '╭', '╮'
@@ -117,7 +195,7 @@ class App:
         H, V = '─', '│'
 
         lines = []
-        lines.append(Text(f"{TL}{H * (box_width - 2)}{TR}", style=STYLE_GRAY))
+        lines.append(Text(f"{TL}{H * (box_width - 2)}{TR}", style=STYLE_DEFAULT))
 
         status = self._get_status()
         if status["initialized"]:
@@ -130,12 +208,12 @@ class App:
                 osc_url = f"https://{remote_raw}"
 
             status_entries = [
-                ("项目: ", STYLE_GRAY, os.path.basename(self.git.cwd), STYLE_WHITE),
-                ("分支: ", STYLE_GRAY, status["branch"], STYLE_WHITE),
+                ("项目: ", STYLE_DEFAULT, os.path.basename(self.git.cwd), STYLE_WHITE),
+                ("分支: ", STYLE_DEFAULT, status["branch"], STYLE_WHITE),
             ]
 
             remote_line = Text()
-            remote_line.append("远程: ", style=STYLE_GRAY)
+            remote_line.append("远程: ", style=STYLE_DEFAULT)
             if remote_raw != "未配置":
                 remote_line.append(remote_raw, style=Style(link=osc_url, color="#F9E2AF"))
             else:
@@ -143,7 +221,7 @@ class App:
 
             latest_release = self._get_release()
             version_line = Text()
-            version_line.append("版本: ", style=STYLE_GRAY)
+            version_line.append("版本: ", style=STYLE_DEFAULT)
             if latest_release:
                 release_url = f"{osc_url}/releases/tag/{latest_release}"
                 version_line.append(latest_release, style=Style(link=release_url, color="#A6E3A1"))
@@ -167,12 +245,12 @@ class App:
             rem = max(0, min(box_width - 4, self.timeout_seconds))
             elap = (box_width - 4) - rem
             timer = Text()
-            timer.append(V, style=STYLE_GRAY)
+            timer.append(V, style=STYLE_DEFAULT)
             timer.append(" ")
             timer.append("─" * rem, style=STYLE_DIM)
             timer.append("┄" * elap, style=STYLE_BLUE)
             timer.append(" ")
-            timer.append(V, style=STYLE_GRAY)
+            timer.append(V, style=STYLE_DEFAULT)
             lines.append(timer)
 
             try:
@@ -199,11 +277,11 @@ class App:
 
             if show_top:
                 ind = Text()
-                ind.append(V, style=STYLE_GRAY)
+                ind.append(V, style=STYLE_DEFAULT)
                 ind.append("    ")
                 ind.append("...", style=STYLE_DIM)
                 ind.append(" " * (box_width - 8 - 1))
-                ind.append(V, style=STYLE_GRAY)
+                ind.append(V, style=STYLE_DEFAULT)
                 lines.append(ind)
 
             max_name_width = 0
@@ -218,7 +296,7 @@ class App:
                 name = item["name"]
 
                 line = Text()
-                line.append(V, style=STYLE_GRAY)
+                line.append(V, style=STYLE_DEFAULT)
                 line.append(" ")
 
                 status_char = self.git.updated_items.get(name)
@@ -259,30 +337,30 @@ class App:
                 visible = get_display_width(line.plain)
                 padding = max(0, box_width - visible - 1)
                 line.append(" " * padding)
-                line.append(V, style=STYLE_GRAY)
+                line.append(V, style=STYLE_DEFAULT)
                 lines.append(line)
 
             if show_bottom:
                 ind = Text()
-                ind.append(V, style=STYLE_GRAY)
+                ind.append(V, style=STYLE_DEFAULT)
                 ind.append("    ")
                 ind.append("...", style=STYLE_DIM)
                 ind.append(" " * (box_width - 8 - 1))
-                ind.append(V, style=STYLE_GRAY)
+                ind.append(V, style=STYLE_DEFAULT)
                 lines.append(ind)
 
-        lines.append(Text(f"{BL}{H * (box_width - 2)}{BR}", style=STYLE_GRAY))
+        lines.append(Text(f"{BL}{H * (box_width - 2)}{BR}", style=STYLE_DEFAULT))
         return Group(*lines)
 
     def _add_box_line(self, lines, content, box_width, V):
         line = Text()
-        line.append(V, style=STYLE_GRAY)
+        line.append(V, style=STYLE_DEFAULT)
         line.append(" ")
         line.append_text(content)
         visible = get_display_width(line.plain)
         padding = max(0, box_width - visible - 1)
         line.append(" " * padding)
-        line.append(V, style=STYLE_GRAY)
+        line.append(V, style=STYLE_DEFAULT)
         lines.append(line)
 
     def build_log_text(self):
@@ -489,24 +567,47 @@ class App:
         self.refresh_file_list()
 
         with Live(
-            self.build_screen(),
+            self.build_mode_selection_screen(),
             console=self.console,
             refresh_per_second=4,
             screen=True,
         ) as live:
             self._live = live
 
-            if not self.first_sync_done:
-                self.operation_in_progress = True
+            # 模式选择阶段
+            mode_selected = False
+            while not mode_selected:
+                if msvcrt.kbhit():
+                    key = get_key()
+                    mode_selected = self.handle_mode_key(key)
+                    live.update(self.build_mode_selection_screen())
+                else:
+                    time.sleep(0.05)
+
+            chosen_mode = self.mode_index  # 0=同步, 1=恢复
+
+            if chosen_mode == 1:
+                # 恢复模式
                 live.update(self.build_screen())
-                self.git.sync()
+                self.run_restore()
                 self.first_sync_done = True
                 self._refresh_caches()
-                self.operation_in_progress = False
-                self.cooldown_until = time.time() + COOLDOWN_PERIOD
                 self.refresh_file_list()
                 self.deadline = time.time() + IDLE_TIMEOUT
                 live.update(self.build_screen())
+            else:
+                # 同步模式
+                if not self.first_sync_done:
+                    self.operation_in_progress = True
+                    live.update(self.build_screen())
+                    self.git.sync()
+                    self.first_sync_done = True
+                    self._refresh_caches()
+                    self.operation_in_progress = False
+                    self.cooldown_until = time.time() + COOLDOWN_PERIOD
+                    self.refresh_file_list()
+                    self.deadline = time.time() + IDLE_TIMEOUT
+                    live.update(self.build_screen())
 
             while self.running:
                 if msvcrt.kbhit():
