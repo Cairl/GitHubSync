@@ -154,40 +154,26 @@ class App:
         lines.append(Text(f"{TL}{H * (box_width - 2)}{TR}", style=STYLE_DEFAULT))
 
         # ── 模式指示器 ──
-        mode_names = ["推送模式  ◀", "▶  恢复模式"]
-        left_hint = "◀ "
-        right_hint = " ▶"
+        mode_names = ["推送模式", "恢复模式"]
         inner_width = box_width - 2
-        left_arrow_w = get_display_width(left_hint)
-        right_arrow_w = get_display_width(right_hint)
-        content_w = inner_width - left_arrow_w - right_arrow_w
-        each_mode_w = content_w // 2
+        each_mode_w = inner_width // 2
 
         mode_line = Text()
         mode_line.append(V, style=STYLE_DEFAULT)
-        mode_line.append(left_hint, style=STYLE_DIM)
         for i, name in enumerate(mode_names):
             w = get_display_width(name)
             pad = each_mode_w - w
             pad_l = pad // 2
             pad_r = pad - pad_l
-            is_sel = (self.mode >= 0 and i == self.mode)
+            is_sel = (i == self.mode)
             s = style_sel if is_sel else STYLE_DEFAULT
             mode_line.append(" " * pad_l, style=s)
             mode_line.append(name, style=s)
             mode_line.append(" " * pad_r, style=s)
-        mode_line.append(right_hint, style=STYLE_DIM)
         mode_line.append(V, style=STYLE_DEFAULT)
         lines.append(mode_line)
 
         lines.append(Text(f"├{H * (box_width - 2)}┤", style=STYLE_DEFAULT))
-
-        # ── 模式选择提示（未锁定时显示）──
-        if not self.mode_locked:
-            hint_text = Text()
-            hint_text.append("  ◀ ▶ 选择模式，回车确认", style=STYLE_YELLOW)
-            self._add_box_line(lines, hint_text, box_width, V)
-            lines.append(Text(f"├{H * (box_width - 2)}┤", style=STYLE_DEFAULT))
 
         # ── 状态区 ──
         status = self._get_status()
@@ -443,8 +429,6 @@ class App:
         elif key == KEY_RIGHT:
             if not self.mode_locked and self.mode != 1:
                 self.mode = 1
-                if not self.release_items:
-                    self.load_releases()
             elif self.mode == 1 and self.mode_locked:
                 if self.release_items and self.release_items[0]["name"] != "(无版本)":
                     self.action_index = 1
@@ -639,8 +623,8 @@ class App:
                 self.refresh_file_list()
                 self.deadline = time.time() + IDLE_TIMEOUT
         elif self.mode == 1:
-            # 恢复模式：加载版本列表（已在 handle_key 中完成）
-            pass
+            # 恢复模式：确认后才加载版本列表
+            self.load_releases()
 
     def run(self):
         enable_vt100()
