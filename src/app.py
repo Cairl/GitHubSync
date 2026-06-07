@@ -178,15 +178,10 @@ class App:
         # ── 状态区 ──
         status = self._get_status()
         if status["initialized"]:
-            if self.mode == 0:
-                status_entries = [
-                    ("项目: ", STYLE_DEFAULT, os.path.basename(self.git.cwd), STYLE_WHITE),
-                    ("分支: ", STYLE_DEFAULT, status["branch"], STYLE_WHITE),
-                ]
-            else:
-                status_entries = [
-                    ("项目: ", STYLE_DEFAULT, os.path.basename(self.git.cwd), STYLE_WHITE),
-                ]
+            status_entries = [
+                ("项目: ", STYLE_DEFAULT, os.path.basename(self.git.cwd), STYLE_WHITE),
+                ("分支: ", STYLE_DEFAULT, status["branch"], STYLE_WHITE),
+            ]
 
             remote_line = Text()
             remote_line.append("远程: ", style=STYLE_DEFAULT)
@@ -223,9 +218,7 @@ class App:
             self._add_box_line(lines, line, box_width, V)
 
         self._add_box_line(lines, remote_line, box_width, V)
-
-        if self.mode == 0:
-            self._add_box_line(lines, version_line, box_width, V)
+        self._add_box_line(lines, version_line, box_width, V)
 
         # ── 计时器（仅推送模式且已同步）──
         if self.mode == 0 and self.first_sync_done and self.file_items:
