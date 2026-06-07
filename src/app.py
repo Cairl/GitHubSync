@@ -25,10 +25,11 @@ class App:
         self.git = GitManager(repo_path, on_log=self._on_git_log)
         self.console = Console()
         self.running = True
-        self.mode_index = 0
+        self.mode = 0                   # 0=推送模式, 1=恢复模式
         self.selected_index = 0
         self.action_index = 0
         self.file_items = []
+        self.release_items = []
         self.first_sync_done = False
         self.timeout_seconds = IDLE_TIMEOUT
         self.deadline = time.time() + IDLE_TIMEOUT
@@ -111,94 +112,84 @@ class App:
         except Exception as e:
             self.git.log(f"刷新文件列表异常: {e}", "NOTE")
 
-    def build_mode_selection_screen(self):
-        cell_width = 12
-        total_inner = cell_width * 2 + 1
-        TL, TR = '╭', '╮'
-        BL, BR = '╰', '╯'
-        H, V = '─', '│'
-        style_sel = Style(bgcolor="#585B70", color="#CDD6F4", bold=True)
+    def load_releases(self):
+        self.release_items = []
+        releases = self.git.get_all_releases()
+        for tag in releases:
+            self.release_items.append({
+                "name": tag,
+                "action_text": "恢复",
+            })
+        if not self.release_items:
+            self.release_items.append({
+                "name": "(无版本)",
+                "action_text": "",
+            })
 
-        lines = []
-        lines.append(Text(f"{TL}{H * total_inner}{TR}", style=STYLE_DEFAULT))
-
-        title = Text("选择模式", style=Style(color="#CDD6F4", bold=True))
-        pad_total = total_inner - get_display_width(title.plain)
-        pad_left = pad_total // 2
-        pad_right = pad_total - pad_left
-        t = Text()
-        t.append(V, style=STYLE_DEFAULT)
-        t.append(" " * pad_left, style=STYLE_DEFAULT)
-        t.append(title)
-        t.append(" " * pad_right, style=STYLE_DEFAULT)
-        t.append(V, style=STYLE_DEFAULT)
-        lines.append(t)
-
-        lines.append(Text(f"├{H * cell_width}┬{H * cell_width}┤", style=STYLE_DEFAULT))
-
-        modes = ["同步模式", "恢复模式"]
-        for row in range(3):
-            line = Text()
-            line.append(V, style=STYLE_DEFAULT)
-            for i, name in enumerate(modes):
-                is_sel = (i == self.mode_index)
-                sel_style = style_sel if is_sel else STYLE_DEFAULT
-                if row == 1:
-                    pad_total = cell_width - get_display_width(name)
-                    pad_left = pad_total // 2
-                    pad_right = pad_total - pad_left
-                    line.append(" " * pad_left, style=sel_style)
-                    line.append(name, style=sel_style)
-                    line.append(" " * pad_right, style=sel_style)
-                else:
-                    line.append(" " * cell_width, style=sel_style)
-                if i == 0:
-                    line.append(V, style=STYLE_DEFAULT)
-            line.append(V, style=STYLE_DEFAULT)
-            lines.append(line)
-
-        lines.append(Text(f"{BL}{H * cell_width}┴{H * cell_width}{BR}", style=STYLE_DEFAULT))
-        return Group(*lines)
-
-    def handle_mode_key(self, key):
-        if key == KEY_LEFT:
-            self.mode_index = 0
-        elif key == KEY_RIGHT:
-            self.mode_index = 1
-        elif key == KEY_ENTER:
-            return True
-        return False
-
-    def run_restore(self):
-        self.git.log("开始从云端仓库恢复…", "ACTION")
-        status = self.git.get_status()
-        if not status["initialized"]:
-            self.git.log("Git 仓库未初始化", "FAIL")
-            return
-        branch = status.get("branch", "main")
-        if branch == "未知" or not branch:
-            branch = "main"
-        s, m = run_command(f"git fetch origin {branch}", cwd=self.git.cwd)
-        if not s:
-            self.git.log(f"拉取远程失败: {m}", "FAIL")
-            return
-        s, m = run_command(f"git reset --hard origin/{branch}", cwd=self.git.cwd)
-        if s:
-            self.git.log("所有文件已恢复到远程最新状态", "DONE")
-        else:
-            self.git.log(f"恢复失败: {m}", "FAIL")
+    def do_first_sync(self):
+        self.operation_in_progress = True
+        self.git.sync()
+        self.first_sync_done = True
+        self._refresh_caches()
+        self.operation_in_progress = False
+        self.cooldown_until = time.time() + COOLDOWN_PERIOD
+        self.refresh_file_list()
+        self.deadline = time.time() + IDLE_TIMEOUT
 
     def build_main_box(self):
         box_width = 60
         TL, TR = '╭', '╮'
         BL, BR = '╰', '╯'
         H, V = '─', '│'
+        style_sel = Style(bgcolor="#585B70", color="#CDD6F4", bold=True)
 
         lines = []
         lines.append(Text(f"{TL}{H * (box_width - 2)}{TR}", style=STYLE_DEFAULT))
 
+        # ── 模式指示器 ──
+        mode_names = ["推送模式", "恢复模式"]
+        left_hint = "◀ "
+        right_hint = " ▶"
+        inner_width = box_width - 2
+        left_arrow_w = get_display_width(left_hint)
+        right_arrow_w = get_display_width(right_hint)
+        content_w = inner_width - left_arrow_w - right_arrow_w
+        each_mode_w = content_w // 2
+
+        mode_line = Text()
+        mode_line.append(V, style=STYLE_DEFAULT)
+        mode_line.append(left_hint, style=STYLE_DIM)
+        for i, name in enumerate(mode_names):
+            w = get_display_width(name)
+            pad = each_mode_w - w
+            pad_l = pad // 2
+            pad_r = pad - pad_l
+            is_sel = (i == self.mode)
+            s = style_sel if is_sel else STYLE_DEFAULT
+            mode_line.append(" " * pad_l, style=s)
+            mode_line.append(name, style=s)
+            mode_line.append(" " * pad_r, style=s)
+        mode_line.append(right_hint, style=STYLE_DIM)
+        mode_line.append(V, style=STYLE_DEFAULT)
+        lines.append(mode_line)
+
+        lines.append(Text(f"├{H * (box_width - 2)}┤", style=STYLE_DEFAULT))
+
+        # ── 状态区 ──
         status = self._get_status()
         if status["initialized"]:
+            if self.mode == 0:
+                status_entries = [
+                    ("项目: ", STYLE_DEFAULT, os.path.basename(self.git.cwd), STYLE_WHITE),
+                    ("分支: ", STYLE_DEFAULT, status["branch"], STYLE_WHITE),
+                ]
+            else:
+                status_entries = [
+                    ("项目: ", STYLE_DEFAULT, os.path.basename(self.git.cwd), STYLE_WHITE),
+                ]
+
+            remote_line = Text()
+            remote_line.append("远程: ", style=STYLE_DEFAULT)
             remote_raw = status["remote"]
             if remote_raw.startswith("git@"):
                 osc_url = f"https://{remote_raw[len('git@'):].replace(':', '/', 1)}"
@@ -207,13 +198,6 @@ class App:
             else:
                 osc_url = f"https://{remote_raw}"
 
-            status_entries = [
-                ("项目: ", STYLE_DEFAULT, os.path.basename(self.git.cwd), STYLE_WHITE),
-                ("分支: ", STYLE_DEFAULT, status["branch"], STYLE_WHITE),
-            ]
-
-            remote_line = Text()
-            remote_line.append("远程: ", style=STYLE_DEFAULT)
             if remote_raw != "未配置":
                 remote_line.append(remote_raw, style=Style(link=osc_url, color="#F9E2AF"))
             else:
@@ -239,9 +223,12 @@ class App:
             self._add_box_line(lines, line, box_width, V)
 
         self._add_box_line(lines, remote_line, box_width, V)
-        self._add_box_line(lines, version_line, box_width, V)
 
-        if self.first_sync_done and self.file_items:
+        if self.mode == 0:
+            self._add_box_line(lines, version_line, box_width, V)
+
+        # ── 计时器（仅推送模式且已同步）──
+        if self.mode == 0 and self.first_sync_done and self.file_items:
             rem = max(0, min(box_width - 4, self.timeout_seconds))
             elap = (box_width - 4) - rem
             timer = Text()
@@ -253,27 +240,38 @@ class App:
             timer.append(V, style=STYLE_DEFAULT)
             lines.append(timer)
 
+        # ── 列表区 ──
+        if self.mode == 0:
+            items = self.file_items
+            sel_idx = self.selected_index
+            show_list = self.first_sync_done
+        else:
+            items = self.release_items
+            sel_idx = self.selected_index
+            show_list = True
+
+        if show_list and items:
             try:
                 term_height = shutil.get_terminal_size().lines
             except Exception:
                 term_height = 24
             reserved = 6 + 8
-            max_file_height = max(3, term_height - reserved)
+            max_height = max(3, term_height - reserved)
 
             display_start = 0
-            display_items = self.file_items
+            display_items = items
             show_top = False
             show_bottom = False
 
-            if len(self.file_items) > max_file_height:
-                half = max_file_height // 2
-                display_start = max(0, self.selected_index - half)
-                end = min(len(self.file_items), display_start + max_file_height)
-                if end == len(self.file_items):
-                    display_start = max(0, end - max_file_height)
-                display_items = self.file_items[display_start:end]
+            if len(items) > max_height:
+                half = max_height // 2
+                display_start = max(0, sel_idx - half)
+                end = min(len(items), display_start + max_height)
+                if end == len(items):
+                    display_start = max(0, end - max_height)
+                display_items = items[display_start:end]
                 show_top = display_start > 0
-                show_bottom = (display_start + len(display_items)) < len(self.file_items)
+                show_bottom = (display_start + len(display_items)) < len(items)
 
             if show_top:
                 ind = Text()
@@ -292,27 +290,28 @@ class App:
 
             for i, item in enumerate(display_items):
                 actual_index = display_start + i
-                is_selected = (actual_index == self.selected_index)
+                is_selected = (actual_index == sel_idx)
                 name = item["name"]
 
                 line = Text()
                 line.append(V, style=STYLE_DEFAULT)
                 line.append(" ")
 
-                status_char = self.git.updated_items.get(name)
-                if status_char == 'A':
-                    line.append("[+]", style=STYLE_GREEN)
-                elif status_char == 'D':
-                    line.append("[-]", style=STYLE_RED)
-                else:
-                    line.append("   ")
+                if self.mode == 0:
+                    status_char = self.git.updated_items.get(name)
+                    if status_char == 'A':
+                        line.append("[+]", style=STYLE_GREEN)
+                    elif status_char == 'D':
+                        line.append("[-]", style=STYLE_RED)
+                    else:
+                        line.append("   ")
 
                 if is_selected:
-                    if item["ignored"]:
+                    if self.mode == 0 and item.get("ignored", False):
                         name_style = Style(bgcolor="#31748F", bold=True, color="#CDD6F4", strike=True)
                     else:
                         name_style = STYLE_SELECTED
-                elif item["ignored"]:
+                elif self.mode == 0 and item.get("ignored", False):
                     name_style = STYLE_STRIKE
                 else:
                     name_style = STYLE_WHITE
@@ -321,18 +320,24 @@ class App:
                 line.append(" " * name_pad, style=name_style if is_selected else None)
                 line.append(" ", style=name_style if is_selected else None)
 
-                if is_selected and self.action_index == 1:
-                    action_color = STYLE_GREEN if item["ignored"] else STYLE_RED
-                    line.append(f"  ")
-                    line.append(f" {item['action_text']} ", style=Style(
-                        bgcolor="#31748F", bold=True,
-                        color=action_color.color if action_color.color else "#CDD6F4"
-                    ))
-                else:
-                    line.append(f"   {item['action_text']} ", style=STYLE_DIM)
+                action_text = item.get("action_text", "")
+                if action_text:
+                    if is_selected and self.action_index == 1:
+                        if self.mode == 0:
+                            action_color = STYLE_GREEN if item.get("ignored", False) else STYLE_RED
+                        else:
+                            action_color = STYLE_GREEN
+                        line.append(f"  ")
+                        line.append(f" {action_text} ", style=Style(
+                            bgcolor="#31748F", bold=True,
+                            color=action_color.color if action_color.color else "#CDD6F4"
+                        ))
+                    else:
+                        line.append(f"   {action_text} ", style=STYLE_DIM)
 
-                if item["tag_text"]:
-                    line.append(f" {item['tag_text']}", style=STYLE_DIM)
+                tag_text = item.get("tag_text", "")
+                if tag_text:
+                    line.append(f" {tag_text}", style=STYLE_DIM)
 
                 visible = get_display_width(line.plain)
                 padding = max(0, box_width - visible - 1)
@@ -374,10 +379,13 @@ class App:
         except Exception:
             term_height = 24
 
-        status = self._get_status()
         box_lines = 2 + 4 + 1
-        if self.first_sync_done and self.file_items:
-            box_lines += min(len(self.file_items), max(3, term_height - 14))
+        if self.mode == 0:
+            if self.first_sync_done and self.file_items:
+                box_lines += min(len(self.file_items), max(3, term_height - 14))
+        else:
+            if self.release_items:
+                box_lines += min(len(self.release_items), max(3, term_height - 14))
         available = max(1, term_height - box_lines - 2)
 
         recent = self.git.logs[-available:] if len(self.git.logs) > available else self.git.logs
@@ -402,25 +410,50 @@ class App:
         return Group(*parts)
 
     def handle_key(self, key):
+        if self.mode == 0:
+            items = self.file_items
+        else:
+            items = self.release_items
+
         if key == KEY_UP:
-            if self.file_items:
-                self.selected_index = (self.selected_index - 1) % len(self.file_items)
+            if items:
+                self.selected_index = (self.selected_index - 1) % len(items)
                 self.action_index = 0
         elif key == KEY_DOWN:
-            if self.file_items:
-                self.selected_index = (self.selected_index + 1) % len(self.file_items)
+            if items:
+                self.selected_index = (self.selected_index + 1) % len(items)
                 self.action_index = 0
         elif key == KEY_LEFT:
-            self.action_index = 0
+            if self.mode != 0:
+                self.mode = 0
+                self.selected_index = 0
+                self.action_index = 0
+            else:
+                self.action_index = 0
         elif key == KEY_RIGHT:
-            self.action_index = 1
-        elif key == KEY_ENTER:
-            if self.file_items and self.file_items[self.selected_index]["name"] != "(空目录)":
-                if self.action_index == 1:
-                    self.execute_action()
-                else:
+            if self.mode != 1:
+                self.mode = 1
+                self.selected_index = 0
+                self.action_index = 0
+                if not self.release_items:
+                    self.load_releases()
+            else:
+                if self.release_items and self.release_items[0]["name"] != "(无版本)":
                     self.action_index = 1
-                self.deadline = time.time() + IDLE_TIMEOUT
+        elif key == KEY_ENTER:
+            if self.mode == 0:
+                if self.file_items and self.file_items[self.selected_index]["name"] != "(空目录)":
+                    if self.action_index == 1:
+                        self.execute_action()
+                    else:
+                        self.action_index = 1
+                    self.deadline = time.time() + IDLE_TIMEOUT
+            else:
+                if self.release_items and self.release_items[0]["name"] != "(无版本)":
+                    if self.action_index == 1:
+                        self.execute_restore()
+                    else:
+                        self.action_index = 1
         elif key == KEY_O or key == b"O":
             self.open_remote()
 
@@ -440,6 +473,24 @@ class App:
             self._refresh_caches()
             self.operation_in_progress = False
             self.cooldown_until = time.time() + COOLDOWN_PERIOD
+
+    def execute_restore(self):
+        item = self.release_items[self.selected_index]
+        tag = item["name"]
+        if tag == "(无版本)" or self.first_sync_done:
+            return
+
+        self.operation_in_progress = True
+        try:
+            success = self.git.restore_to_tag(tag)
+            if success:
+                self.first_sync_done = True
+                self._refresh_caches()
+                self.refresh_file_list()
+        finally:
+            self.operation_in_progress = False
+            self.cooldown_until = time.time() + COOLDOWN_PERIOD
+            self.action_index = 0
 
     def remove_from_github(self, item_name):
         with self.git.action(f"删除: {item_name}") as result:
@@ -567,47 +618,18 @@ class App:
         self.refresh_file_list()
 
         with Live(
-            self.build_mode_selection_screen(),
+            self.build_screen(),
             console=self.console,
             refresh_per_second=4,
             screen=True,
         ) as live:
             self._live = live
+            live.update(self.build_screen())
 
-            # 模式选择阶段
-            mode_selected = False
-            while not mode_selected:
-                if msvcrt.kbhit():
-                    key = get_key()
-                    mode_selected = self.handle_mode_key(key)
-                    live.update(self.build_mode_selection_screen())
-                else:
-                    time.sleep(0.05)
-
-            chosen_mode = self.mode_index  # 0=同步, 1=恢复
-
-            if chosen_mode == 1:
-                # 恢复模式
+            if not self.first_sync_done:
                 live.update(self.build_screen())
-                self.run_restore()
-                self.first_sync_done = True
-                self._refresh_caches()
-                self.refresh_file_list()
-                self.deadline = time.time() + IDLE_TIMEOUT
+                self.do_first_sync()
                 live.update(self.build_screen())
-            else:
-                # 同步模式
-                if not self.first_sync_done:
-                    self.operation_in_progress = True
-                    live.update(self.build_screen())
-                    self.git.sync()
-                    self.first_sync_done = True
-                    self._refresh_caches()
-                    self.operation_in_progress = False
-                    self.cooldown_until = time.time() + COOLDOWN_PERIOD
-                    self.refresh_file_list()
-                    self.deadline = time.time() + IDLE_TIMEOUT
-                    live.update(self.build_screen())
 
             while self.running:
                 if msvcrt.kbhit():

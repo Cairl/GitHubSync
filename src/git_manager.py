@@ -140,6 +140,39 @@ class GitManager:
                 return parts[0]
         return None
 
+    def get_all_releases(self):
+        repo_slug = self.get_repo_slug()
+        if not repo_slug:
+            return []
+        s, m = run_command(f"gh release list --repo {repo_slug} --limit 20")
+        if not s or not m:
+            return []
+        releases = []
+        for line in m.splitlines():
+            parts = line.split()
+            if parts:
+                releases.append(parts[0])
+        return releases
+
+    def restore_to_tag(self, tag):
+        repo_slug = self.get_repo_slug()
+        if not repo_slug:
+            self.log("无法获取仓库信息", "NOTE")
+            return False
+        with self.action(f"拉取 {tag}") as result:
+            s, m = run_command("git fetch origin", cwd=self.cwd)
+            if not s:
+                result.failed = True
+                result.detail = m
+                return False
+        with self.action(f"恢复到 {tag}") as result:
+            s, m = run_command(f"git reset --hard {tag}", cwd=self.cwd)
+            if not s:
+                result.failed = True
+                result.detail = m
+                return False
+        return True
+
     def calculate_next_version(self):
         latest = self.get_latest_release()
         now = datetime.now()

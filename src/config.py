@@ -43,6 +43,7 @@ KEY_ENTER = b"\r"
 KEY_ESC   = b"\x1b"
 KEY_Q     = b"q"
 KEY_O     = b"o"
+KEY_TAB   = b"\t"
 
 # ─── 超时设置 ───────
 IDLE_TIMEOUT = 60
