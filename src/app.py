@@ -115,15 +115,17 @@ class App:
 
     def load_releases(self):
         self.release_items = []
-        releases = self.git.get_all_releases()
-        for tag in releases:
+        commits = self.git.get_recent_commits()
+        for commit in commits:
             self.release_items.append({
-                "name": tag,
+                "name": commit["hash"][:8],
+                "message": commit["message"],
                 "action_text": "恢复",
             })
         if not self.release_items:
             self.release_items.append({
-                "name": "(无版本)",
+                "name": "(无提交)",
+                "message": "",
                 "action_text": "",
             })
 
@@ -244,6 +246,11 @@ class App:
             show_list = True
 
         if show_list and items:
+            # 列表区顶部横隔线
+            sep = Text()
+            sep.append(f"├{'─' * (box_width - 2)}┤", style=STYLE_DEFAULT)
+            lines.append(sep)
+
             try:
                 term_height = shutil.get_terminal_size().lines
             except Exception:
@@ -331,6 +338,10 @@ class App:
                 tag_text = item.get("tag_text", "")
                 if tag_text:
                     line.append(f" {tag_text}", style=STYLE_DIM)
+
+                # 恢复模式显示 commit message
+                if self.mode == 1 and item.get("message"):
+                    line.append(f"  {item['message']}", style=STYLE_DIM)
 
                 visible = get_display_width(line.plain)
                 padding = max(0, box_width - visible - 1)
@@ -464,13 +475,13 @@ class App:
 
     def execute_restore(self):
         item = self.release_items[self.selected_index]
-        tag = item["name"]
-        if tag == "(无版本)" or self.first_sync_done:
+        commit_hash = item["name"]
+        if commit_hash == "(无提交)" or self.first_sync_done:
             return
 
         self.operation_in_progress = True
         try:
-            success = self.git.restore_to_tag(tag)
+            success = self.git.restore_to_commit(commit_hash)
             if success:
                 self.first_sync_done = True
                 self._refresh_caches()

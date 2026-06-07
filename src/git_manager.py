@@ -154,6 +154,21 @@ class GitManager:
                 releases.append(parts[0])
         return releases
 
+    def get_recent_commits(self, limit=20):
+        """获取最近的 git commits"""
+        s, m = run_command(f'git log --oneline -{limit} --format="%H %s"', cwd=self.cwd)
+        if not s or not m:
+            return []
+        commits = []
+        for line in m.splitlines():
+            if line.strip():
+                parts = line.split(" ", 1)
+                if len(parts) >= 2:
+                    commits.append({"hash": parts[0], "message": parts[1]})
+                elif len(parts) == 1:
+                    commits.append({"hash": parts[0], "message": ""})
+        return commits
+
     def restore_to_tag(self, tag):
         repo_slug = self.get_repo_slug()
         if not repo_slug:
@@ -167,6 +182,16 @@ class GitManager:
                 return False
         with self.action(f"恢复到 {tag}") as result:
             s, m = run_command(f"git reset --hard {tag}", cwd=self.cwd)
+            if not s:
+                result.failed = True
+                result.detail = m
+                return False
+        return True
+
+    def restore_to_commit(self, commit_hash):
+        """恢复到指定的 commit"""
+        with self.action(f"恢复到 {commit_hash[:8]}") as result:
+            s, m = run_command(f"git reset --hard {commit_hash}", cwd=self.cwd)
             if not s:
                 result.failed = True
                 result.detail = m
