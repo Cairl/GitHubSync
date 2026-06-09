@@ -255,9 +255,9 @@ class App:
         if show_list and items:
             # 列表区顶部横隔线
             sep = Text()
-            sep.append("│", style=STYLE_DIM)
-            sep.append("─" * (box_width - 2), style=STYLE_DIM)
-            sep.append("│", style=STYLE_DIM)
+            sep.append("│", style=STYLE_DEFAULT)
+            sep.append(" " + "─" * (box_width - 4) + " ", style=STYLE_DEFAULT)
+            sep.append("│", style=STYLE_DEFAULT)
             lines.append(sep)
 
             try:
