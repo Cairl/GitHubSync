@@ -662,7 +662,6 @@ class App:
                 fuse_remaining = self._fuse_remaining()
                 if fuse_remaining is not None and fuse_remaining <= 0:
                     if not self.mode_locked:
-                        self.mode = 0
                         self.mode_locked = True
                         self._on_mode_selected()
                         live.update(self.build_screen())
