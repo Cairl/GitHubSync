@@ -184,17 +184,17 @@ class App:
         lines.append(mode_line)
 
         fuse_line = Text()
-        fuse_line.append("│", style=STYLE_DIM)
+        fuse_line.append("├", style=STYLE_DEFAULT)
         fuse_remaining = self._fuse_remaining()
         if fuse_remaining is not None and fuse_remaining > 0:
             progress = 1 - (fuse_remaining / MODE_TIMEOUT)
             burnt_count = max(1, int(inner_width * progress))
             unburnt_count = inner_width - burnt_count
-            fuse_line.append(FUSE_UNBURNT * unburnt_count, style=STYLE_DIM)
-            fuse_line.append(FUSE_BURNT * burnt_count, style=STYLE_DIM)
+            fuse_line.append(FUSE_UNBURNT * unburnt_count, style=STYLE_DEFAULT)
+            fuse_line.append(FUSE_BURNT * burnt_count, style=STYLE_DEFAULT)
         else:
-            fuse_line.append(H * inner_width, style=STYLE_DIM)
-        fuse_line.append("│", style=STYLE_DIM)
+            fuse_line.append(H * inner_width, style=STYLE_DEFAULT)
+        fuse_line.append("┤", style=STYLE_DEFAULT)
         lines.append(fuse_line)
 
         # ── 状态区 ──
@@ -255,7 +255,9 @@ class App:
         if show_list and items:
             # 列表区顶部横隔线
             sep = Text()
-            sep.append(f"├{'─' * (box_width - 2)}┤", style=STYLE_DEFAULT)
+            sep.append("│", style=STYLE_DIM)
+            sep.append("─" * (box_width - 2), style=STYLE_DIM)
+            sep.append("│", style=STYLE_DIM)
             lines.append(sep)
 
             try:
