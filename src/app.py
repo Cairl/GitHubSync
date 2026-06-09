@@ -14,7 +14,8 @@ from .config import (
     STYLE_BLUE, STYLE_DEFAULT, STYLE_WHITE, STYLE_STRIKE, STYLE_SELECTED,
     STYLE_LINK, LEVEL_STYLES, LEVEL_LABELS,
     KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_ENTER, KEY_ESC, KEY_Q, KEY_O,
-    COOLDOWN_PERIOD, STATUS_PANEL_HEIGHT, LOG_PANEL_HEIGHT,
+    MODE_TIMEOUT, COOLDOWN_PERIOD, STATUS_PANEL_HEIGHT, LOG_PANEL_HEIGHT,
+    FUSE_UNBURNT, FUSE_BURNT,
 )
 from .utils import enable_vt100, run_command, get_key, get_display_width
 from .git_manager import GitManager
@@ -34,6 +35,8 @@ class App:
         self.first_sync_done = False
         self.operation_in_progress = False
         self.cooldown_until = 0
+        self.startup_start = time.time()
+        self.task_done_time = None
         self._cached_status = None
         self._cached_release = None
         self._cache_miss_sentinel = object()
@@ -59,6 +62,13 @@ class App:
         self._cached_status = self.git.get_status()
         release = self.git.get_latest_release()
         self._cached_release = release if release is not None else self._cache_miss_sentinel
+
+    def _fuse_remaining(self):
+        if not self.mode_locked:
+            return MODE_TIMEOUT - (time.time() - self.startup_start)
+        if self.task_done_time:
+            return MODE_TIMEOUT - (time.time() - self.task_done_time)
+        return None
 
     def refresh_file_list(self):
         self.file_items = []
@@ -173,7 +183,19 @@ class App:
         mode_line.append(V, style=STYLE_DEFAULT)
         lines.append(mode_line)
 
-        lines.append(Text(f"├{H * (box_width - 2)}┤", style=STYLE_DEFAULT))
+        fuse_line = Text()
+        fuse_line.append("├", style=STYLE_DEFAULT)
+        fuse_remaining = self._fuse_remaining()
+        if fuse_remaining is not None and fuse_remaining > 0:
+            progress = 1 - (fuse_remaining / MODE_TIMEOUT)
+            burnt_count = max(1, int(inner_width * progress))
+            unburnt_count = inner_width - burnt_count
+            fuse_line.append(FUSE_UNBURNT * unburnt_count, style=STYLE_DEFAULT)
+            fuse_line.append(FUSE_BURNT * burnt_count, style=STYLE_DEFAULT)
+        else:
+            fuse_line.append(H * inner_width, style=STYLE_DEFAULT)
+        fuse_line.append("┤", style=STYLE_DEFAULT)
+        lines.append(fuse_line)
 
         # ── 状态区 ──
         status = self._get_status()
@@ -399,6 +421,8 @@ class App:
         return Group(*parts)
 
     def handle_key(self, key):
+        self.startup_start = time.time()
+        self.task_done_time = time.time() if self.mode_locked else None
         if self.mode == 0:
             items = self.file_items
         else:
@@ -456,6 +480,7 @@ class App:
             self._refresh_caches()
             self.operation_in_progress = False
             self.cooldown_until = time.time() + COOLDOWN_PERIOD
+            self.task_done_time = time.time()
 
     def execute_restore(self):
         item = self.release_items[self.selected_index]
@@ -473,6 +498,7 @@ class App:
         finally:
             self.operation_in_progress = False
             self.cooldown_until = time.time() + COOLDOWN_PERIOD
+            self.task_done_time = time.time()
             self.action_index = 0
 
     def remove_from_github(self, item_name):
@@ -612,6 +638,7 @@ class App:
         elif self.mode == 1:
             # 恢复模式：确认后才加载版本列表
             self.load_releases()
+        self.task_done_time = time.time()
 
     def run(self):
         enable_vt100()
@@ -632,6 +659,17 @@ class App:
                 live.update(self.build_screen())
 
             while self.running:
+                fuse_remaining = self._fuse_remaining()
+                if fuse_remaining is not None and fuse_remaining <= 0:
+                    if not self.mode_locked:
+                        self.mode = 0
+                        self.mode_locked = True
+                        self._on_mode_selected()
+                        live.update(self.build_screen())
+                    else:
+                        self.running = False
+                        break
+
                 if msvcrt.kbhit():
                     if self.operation_in_progress or time.time() < self.cooldown_until:
                         while msvcrt.kbhit():
