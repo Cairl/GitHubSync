@@ -10,26 +10,20 @@ def enable_vt100():
 
 
 def get_display_width(text):
-    width = 0
-    for char in str(text):
-        if unicodedata.east_asian_width(char) in ('F', 'W'):
-            width += 2
-        else:
-            width += 1
-    return width
+    return sum(2 if unicodedata.east_asian_width(c) in ('F', 'W') else 1 for c in str(text))
 
 
 def run_command(command, cwd=None):
+    """执行子进程命令。command 可以是字符串（shell=True）或列表（shell=False）。"""
     try:
         result = subprocess.run(
-            command, cwd=cwd, shell=True, check=True,
+            command, cwd=cwd, shell=not isinstance(command, list), check=True,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding='utf-8', errors='replace'
         )
         return True, result.stdout.strip()
     except subprocess.CalledProcessError as e:
-        msg = (e.stdout.strip() + "\n" + e.stderr.strip()).strip()
-        return False, msg
+        return False, f"{e.stdout.strip()}\n{e.stderr.strip()}".strip()
 
 
 def get_key():
@@ -47,7 +41,7 @@ def get_input_with_default(prompt, default_val=""):
     while True:
         try:
             char = msvcrt.getwch()
-        except Exception:
+        except (UnicodeDecodeError, OSError):
             continue
 
         if char == '\r':
@@ -61,7 +55,7 @@ def get_input_with_default(prompt, default_val=""):
         elif char == '\x1b':
             sys.stdout.write('\n')
             return ""
-        elif char == '\x00' or char == '\xe0':
+        elif char in ('\x00', '\xe0'):
             msvcrt.getwch()
         else:
             if char.isprintable():

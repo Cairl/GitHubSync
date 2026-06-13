@@ -8,6 +8,8 @@ from contextlib import contextmanager
 
 
 class _ActionResult:
+    __slots__ = ('failed', 'detail')
+
     def __init__(self):
         self.failed = False
         self.detail = None
@@ -43,35 +45,38 @@ class GitManager:
             if self.on_log:
                 self.on_log()
 
+    def _run_cmd(self, msg, command, cwd=None):
+        """Run a command inside an action context; return (success, stdout)."""
+        with self.action(msg) as result:
+            ok, out = run_command(command, cwd=cwd or self.cwd)
+            if not ok:
+                result.failed = True
+                result.detail = out
+        return ok, out
+
     def get_status(self):
         if not os.path.exists(os.path.join(self.cwd, ".git")):
-            return {"initialized": False}
+            return {"initialized": False, "branch": "main", "remote": "未配置"}
 
-        s, branch = run_command("git rev-parse --abbrev-ref HEAD", cwd=self.cwd)
+        s, branch = run_command(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=self.cwd)
         if not s or branch == "HEAD":
-            s, branch = run_command("git branch --show-current", cwd=self.cwd)
-
+            s, branch = run_command(["git", "branch", "--show-current"], cwd=self.cwd)
         branch = branch.strip() if s and branch.strip() else "main"
 
-        s, remote_out = run_command("git remote -v", cwd=self.cwd)
+        s, remote_out = run_command(["git", "remote", "-v"], cwd=self.cwd)
         remote = "未配置"
-        if s and "origin" in remote_out:
-            parts = remote_out.split()
-            if len(parts) > 1:
-                remote = parts[1]
+        if s and remote_out:
+            for line in remote_out.splitlines():
+                if line.startswith("origin"):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        remote = parts[1]
+                        break
 
-        return {
-            "initialized": True,
-            "branch": branch,
-            "remote": remote
-        }
+        return {"initialized": True, "branch": branch, "remote": remote}
 
     def init_repo(self):
-        with self.action("初始化 Git 仓库") as result:
-            s, m = run_command("git init", cwd=self.cwd)
-            if not s:
-                result.failed = True
-                result.detail = m
+        self._run_cmd("初始化 Git 仓库", ["git", "init"])
 
     def create_ignore(self):
         gitignore_path = os.path.join(self.cwd, ".gitignore")
@@ -87,16 +92,26 @@ class GitManager:
                 result.failed = True
                 result.detail = str(e)
 
+    @staticmethod
+    def _extract_gh_user(remote_output):
+        """从 git remote -v 输出中提取 GitHub 用户名"""
+        if "github.com" not in remote_output:
+            return None
+        match = re.search(r"github\.com[:/]([^/ \n\r]+)/", remote_output)
+        if match:
+            user = match.group(1).split('@')[-1]
+            return user if user and user != "git" else None
+        return None
+
     def get_github_username(self):
-        s, m = run_command("gh api user -q .login")
+        s, m = run_command(["gh", "api", "user", "-q", ".login"])
         if s and m and len(m) < 40:
             return m.strip()
 
-        s, m = run_command("git remote -v", cwd=self.cwd)
-        if "github.com" in m:
-            match = re.search(r"github\.com[:/]([^/ \n\r]+)/", m)
-            if match:
-                return match.group(1).split('@')[-1]
+        s, m = run_command(["git", "remote", "-v"], cwd=self.cwd)
+        user = self._extract_gh_user(m)
+        if user:
+            return user
 
         try:
             parent_dir = os.path.dirname(self.cwd)
@@ -105,15 +120,11 @@ class GitManager:
                 if not os.path.isdir(folder_path) or folder.startswith('.'):
                     continue
                 try:
-                    dot_git = os.path.join(folder_path, ".git")
-                    if os.path.exists(dot_git):
-                        s, m = run_command(f'git -C "{folder_path}" remote -v')
-                        if s and "github.com" in m:
-                            match = re.search(r"github\.com[:/]([^/ \n\r]+)/", m)
-                            if match:
-                                user = match.group(1).split('@')[-1]
-                                if user and user != "git":
-                                    return user
+                    if os.path.exists(os.path.join(folder_path, ".git")):
+                        s, m = run_command(["git", "-C", folder_path, "remote", "-v"])
+                        user = self._extract_gh_user(m)
+                        if user:
+                            return user
                 except Exception:
                     continue
         except Exception:
@@ -122,7 +133,7 @@ class GitManager:
         return None
 
     def get_repo_slug(self):
-        s, m = run_command("git remote -v", cwd=self.cwd)
+        s, m = run_command(["git", "remote", "-v"], cwd=self.cwd)
         if s and "github.com" in m:
             match = re.search(r"github\.com[:/]([^/ \n\r]+)/([^/ \n\r]+?)(?:\.git)?(?:\s|$)", m)
             if match:
@@ -133,7 +144,7 @@ class GitManager:
         repo_slug = self.get_repo_slug()
         if not repo_slug:
             return None
-        s, m = run_command(f"gh release list --repo {repo_slug} --limit 1")
+        s, m = run_command(["gh", "release", "list", "--repo", repo_slug, "--limit", "1"])
         if s and m:
             parts = m.split()
             if parts:
@@ -144,59 +155,38 @@ class GitManager:
         repo_slug = self.get_repo_slug()
         if not repo_slug:
             return []
-        s, m = run_command(f"gh release list --repo {repo_slug} --limit 20")
+        s, m = run_command(["gh", "release", "list", "--repo", repo_slug, "--limit", "20"])
         if not s or not m:
             return []
-        releases = []
-        for line in m.splitlines():
-            parts = line.split()
-            if parts:
-                releases.append(parts[0])
-        return releases
+        return [line.split()[0] for line in m.splitlines() if line.strip()]
 
     def get_recent_commits(self, limit=20):
         """获取最近的 git commits"""
-        s, m = run_command(f'git log --oneline -{limit} --format="%H %ai"', cwd=self.cwd)
+        s, m = run_command(["git", "log", f"-{limit}", "--format=%H %ai"], cwd=self.cwd)
         if not s or not m:
             return []
         commits = []
         for line in m.splitlines():
-            if line.strip():
-                parts = line.split(" ", 1)
-                if len(parts) >= 2:
-                    commits.append({"hash": parts[0], "time": parts[1][:19]})
-                elif len(parts) == 1:
-                    commits.append({"hash": parts[0], "time": ""})
+            if not line.strip():
+                continue
+            h, _, t = line.partition(" ")
+            commits.append({"hash": h, "time": t[:19]})
         return commits
 
     def restore_to_tag(self, tag):
-        repo_slug = self.get_repo_slug()
-        if not repo_slug:
+        if not self.get_repo_slug():
             self.log("无法获取仓库信息", "NOTE")
             return False
-        with self.action(f"拉取 {tag}") as result:
-            s, m = run_command("git fetch origin", cwd=self.cwd)
-            if not s:
-                result.failed = True
-                result.detail = m
-                return False
-        with self.action(f"恢复到 {tag}") as result:
-            s, m = run_command(f"git reset --hard {tag}", cwd=self.cwd)
-            if not s:
-                result.failed = True
-                result.detail = m
-                return False
-        return True
+        s, _ = self._run_cmd(f"拉取 {tag}", ["git", "fetch", "origin"])
+        if not s:
+            return False
+        s, _ = self._run_cmd(f"恢复到 {tag}", ["git", "reset", "--hard", tag])
+        return s
 
     def restore_to_commit(self, commit_hash):
         """恢复到指定的 commit"""
-        with self.action(f"恢复到 {commit_hash[:8]}") as result:
-            s, m = run_command(f"git reset --hard {commit_hash}", cwd=self.cwd)
-            if not s:
-                result.failed = True
-                result.detail = m
-                return False
-        return True
+        s, _ = self._run_cmd(f"恢复到 {commit_hash[:8]}", ["git", "reset", "--hard", commit_hash])
+        return s
 
     def calculate_next_version(self):
         latest = self.get_latest_release()
@@ -255,20 +245,19 @@ class GitManager:
                 tmp_file = f.name
 
             with self.action(f"发布 Release {tag}") as result:
-                s, m = run_command(f'gh release create {tag} --repo {repo_slug} --target main --notes-file "{tmp_file}"')
-                if s:
-                    pass
-                elif "already exist" in m.lower():
-                    with self.action("更新 Release") as update_result:
-                        s, m = run_command(f'gh release edit {tag} --repo {repo_slug} --notes-file "{tmp_file}"')
-                        if not s:
-                            update_result.failed = True
-                            update_result.detail = m
-                            return
-                else:
-                    result.failed = True
-                    result.detail = m
-                    return
+                s, m = run_command(["gh", "release", "create", tag, "--repo", repo_slug, "--target", "main", "--notes-file", tmp_file])
+                if not s:
+                    if "already exist" in m.lower():
+                        with self.action("更新 Release") as update_result:
+                            s, m = run_command(["gh", "release", "edit", tag, "--repo", repo_slug, "--notes-file", tmp_file])
+                            if not s:
+                                update_result.failed = True
+                                update_result.detail = m
+                                return
+                    else:
+                        result.failed = True
+                        result.detail = m
+                        return
 
             with self.action("删除 changelog.md") as result:
                 try:
@@ -286,24 +275,27 @@ class GitManager:
                 except OSError:
                     pass
 
+    def _current_branch(self):
+        """获取当前分支名，回退到 main"""
+        branch = self.get_status().get("branch", "")
+        return branch if branch and branch != "未知" else "main"
+
     def configure_remote(self):
         username = self.get_github_username()
-        repo_name = os.path.basename(self.cwd)
-        url = f"https://github.com/{username}/{repo_name}" if username else ""
-
-        if not url:
+        if not username:
             self.log("无法获取 GitHub 用户名", "NOTE")
             return
 
+        url = f"https://github.com/{username}/{os.path.basename(self.cwd)}"
         with self.action("配置远程仓库") as result:
-            s, m = run_command(f"git remote add origin {url}", cwd=self.cwd)
-            if not s:
-                s, m = run_command(f"git remote set-url origin {url}", cwd=self.cwd)
-            if s:
-                result.detail = url
-            else:
-                result.failed = True
-                result.detail = m
+            for cmd in [["git", "remote", "add", "origin", url],
+                        ["git", "remote", "set-url", "origin", url]]:
+                s, m = run_command(cmd, cwd=self.cwd)
+                if s:
+                    result.detail = url
+                    return
+            result.failed = True
+            result.detail = m
 
     def sync(self):
         self.create_ignore()
@@ -313,39 +305,31 @@ class GitManager:
             self.init_repo()
             status = self.get_status()
 
-        with self.action("扫描") as result:
-            s, m = run_command("git add .", cwd=self.cwd)
-            if not s:
-                result.failed = True
-                result.detail = f"文件暂存异常: {m}"
-                return
+        s, m = self._run_cmd("扫描", ["git", "add", "."])
+        if not s:
+            return
 
-        s, st = run_command("git status --porcelain", cwd=self.cwd)
+        s, st = run_command(["git", "status", "--porcelain"], cwd=self.cwd)
         self.updated_items = {}
         if st:
             for line in st.splitlines():
-                if len(line) > 3:
-                    status_char = line[0] if line[0] != ' ' else line[1]
-                    path = line[3:].strip().strip('"')
-                    if " -> " in path:
-                        path = path.split(" -> ")[-1].strip().strip('"')
-
-                    parts = re.split(r'[\\/]', path)
-                    if parts:
-                        name = parts[0]
-                        final_status = 'D' if status_char == 'D' else 'A'
-                        self.updated_items[name] = final_status
+                if len(line) <= 3:
+                    continue
+                status_char = line[0] if line[0] != ' ' else line[1]
+                path = line[3:].strip().strip('"')
+                if " -> " in path:
+                    path = path.split(" -> ")[-1].strip().strip('"')
+                parts = re.split(r'[\\/]', path)
+                if parts:
+                    self.updated_items[parts[0]] = 'D' if status_char == 'D' else 'A'
 
             msg = f"Update: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             with self.action("提交") as result:
-                s, m = run_command(f'git commit -m "{msg}"', cwd=self.cwd)
+                s, m = run_command(["git", "commit", "-m", msg], cwd=self.cwd)
                 if not s:
                     if "author identity" in m.lower() or "user.name" in m.lower():
-                        username = self.get_github_username() or "User"
-                        run_command(f'git config user.name "{username}"', cwd=self.cwd)
-                        run_command(f'git config user.email "{username}@users.noreply.github.com"', cwd=self.cwd)
-                        self.log(f"自动配置 Git 身份: {username}", "NOTE")
-                        s, m = run_command(f'git commit -m "{msg}"', cwd=self.cwd)
+                        self._configure_git_identity()
+                        s, m = run_command(["git", "commit", "-m", msg], cwd=self.cwd)
                     if not s:
                         result.failed = True
                         result.detail = m
@@ -359,9 +343,9 @@ class GitManager:
             if status["remote"] == "未配置":
                 return
 
-        run_command("git branch -M main", cwd=self.cwd)
+        run_command(["git", "branch", "-M", "main"], cwd=self.cwd)
         with self.action("推送 GitHub") as result:
-            s, m = run_command("git push -u origin main", cwd=self.cwd)
+            s, m = run_command(["git", "push", "-u", "origin", "main"], cwd=self.cwd)
             if not s:
                 result.failed = True
                 result.detail = self._parse_push_error(m)
@@ -372,7 +356,7 @@ class GitManager:
             if "repository not found" in m.lower() or "does not exist" in m.lower() or "404" in m:
                 if self.create_github_repo():
                     with self.action("重新推送") as result:
-                        s, m = run_command("git push -u origin main", cwd=self.cwd)
+                        s, m = run_command(["git", "push", "-u", "origin", "main"], cwd=self.cwd)
                         if not s:
                             result.failed = True
                             result.detail = m
@@ -380,7 +364,10 @@ class GitManager:
                         self.publish_release()
                         return
 
-            self.force_push()
+            # 只有在推送被拒绝（非快进）时才尝试强制推送
+            error_lower = m.lower()
+            if "non-fast-forward" in error_lower or "rejected" in error_lower or "failed to push" in error_lower:
+                self.force_push()
 
     def create_github_repo(self):
         import webbrowser
@@ -388,11 +375,7 @@ class GitManager:
         repo_name = os.path.basename(self.cwd)
         username = self.get_github_username()
 
-        if username:
-            url = f"https://github.com/new?name={repo_name}"
-        else:
-            url = "https://github.com/new"
-
+        url = f"https://github.com/new?name={repo_name}" if username else "https://github.com/new"
         webbrowser.open(url)
 
         with self.action("等待仓库创建") as result:
@@ -402,12 +385,9 @@ class GitManager:
                 result.detail = "无法确定仓库地址"
                 return False
 
-            max_wait = 300
-            waited = 0
-            while waited < max_wait:
+            for _ in range(100):  # 100 × 3s = 300s = 5min
                 time.sleep(3)
-                waited += 3
-                s, m = run_command(f'gh repo view {username}/{repo_name}')
+                s, _ = run_command(["gh", "repo", "view", f"{username}/{repo_name}"])
                 if s:
                     break
                 if self.on_log:
@@ -417,20 +397,26 @@ class GitManager:
                 result.detail = "等待超时（5分钟）"
                 return False
 
-        s, m = run_command(f"git remote add origin {remote_url}", cwd=self.cwd)
+        s, _ = run_command(["git", "remote", "add", "origin", remote_url], cwd=self.cwd)
         if not s:
-            run_command(f"git remote set-url origin {remote_url}", cwd=self.cwd)
+            run_command(["git", "remote", "set-url", "origin", remote_url], cwd=self.cwd)
 
         return True
 
     def force_push(self):
         with self.action("强制推送") as result:
-            s, m = run_command("git push -u origin main --force", cwd=self.cwd)
+            s, m = run_command(["git", "push", "-u", "origin", "main", "--force"], cwd=self.cwd)
             if not s:
                 result.failed = True
                 result.detail = self._parse_push_error(m)
-        if s:
-            self.publish_release()
+                return
+        self.publish_release()
+
+    def _configure_git_identity(self):
+        username = self.get_github_username() or "User"
+        run_command(["git", "config", "user.name", username], cwd=self.cwd)
+        run_command(["git", "config", "user.email", f"{username}@users.noreply.github.com"], cwd=self.cwd)
+        self.log(f"自动配置 Git 身份: {username}", "NOTE")
 
     def _parse_push_error(self, msg):
         m = msg.lower()

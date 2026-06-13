@@ -1,7 +1,8 @@
-﻿import os
+import os
 import sys
 import time
 import shutil
+import fnmatch
 import msvcrt
 
 from rich.console import Console, Group
@@ -22,6 +23,8 @@ from .git_manager import GitManager
 
 
 class App:
+    BOX_WIDTH = 60
+
     def __init__(self, repo_path):
         self.git = GitManager(repo_path, on_log=self._on_git_log)
         self.console = Console()
@@ -41,6 +44,21 @@ class App:
         self._cached_release = None
         self._cache_miss_sentinel = object()
         self._live = None
+
+    @staticmethod
+    def _to_https_url(remote_raw):
+        """将 git@ 或裸 remote 地址统一转为 https URL（去除 .git 后缀）"""
+        if not remote_raw:
+            return ""
+        if remote_raw.startswith("git@"):
+            url = f"https://{remote_raw[len('git@'):].replace(':', '/', 1)}"
+        elif remote_raw.startswith("http"):
+            url = remote_raw
+        else:
+            url = f"https://{remote_raw}"
+        if url.endswith(".git"):
+            url = url[:-4]
+        return url
 
     def _on_git_log(self):
         if self._live:
@@ -70,50 +88,41 @@ class App:
             return MODE_TIMEOUT - (time.time() - self.task_done_time)
         return None
 
+    def _try_commit(self, msg):
+        """尝试 git commit。返回 (ok, msg)：
+        - (True, msg): 提交成功
+        - (False, None): 无需提交（nothing to commit）
+        - (False, msg): 提交失败（真实错误）
+        """
+        s, m = run_command(["git", "commit", "-m", msg], cwd=self.git.cwd)
+        if s:
+            return True, m
+        lower = m.lower()
+        if "nothing to commit" in lower or "no changes added to commit" in lower:
+            return False, None
+        return False, m
+
     def refresh_file_list(self):
         self.file_items = []
         try:
-            items = os.listdir(self.git.cwd)
-            dirs = []
-            files = []
-            for item in items:
-                if item == ".git":
-                    continue
-                if os.path.isdir(os.path.join(self.git.cwd, item)):
-                    dirs.append(item)
-                else:
-                    files.append(item)
+            cwd = self.git.cwd
+            items = os.listdir(cwd)
+            dirs = sorted(item for item in items if item != ".git" and os.path.isdir(os.path.join(cwd, item)))
+            files = sorted(item for item in items if item != ".git" and not os.path.isdir(os.path.join(cwd, item)))
 
-            dirs.sort()
-            files.sort()
-
-            gitignore_path = os.path.join(self.git.cwd, ".gitignore")
-            ignored_items = set()
-            if os.path.exists(gitignore_path):
-                with open(gitignore_path, "r", encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if line and not line.startswith("#"):
-                            ignored_items.add(line.rstrip("/"))
+            patterns, negations = self._read_gitignore()
 
             for name in dirs + files:
-                ignored = name in ignored_items
-                action_text = "推送" if ignored else "删除"
-                tag_text = "(已忽略)" if ignored else ""
+                ignored = self._is_gitignored(name, patterns, negations)
                 self.file_items.append({
                     "name": name,
                     "ignored": ignored,
-                    "action_text": action_text,
-                    "tag_text": tag_text,
+                    "action_text": "推送" if ignored else "删除",
+                    "tag_text": "(已忽略)" if ignored else "",
                 })
 
             if not self.file_items:
-                self.file_items.append({
-                    "name": "(空目录)",
-                    "ignored": False,
-                    "action_text": "",
-                    "tag_text": "",
-                })
+                self.file_items.append({"name": "(空目录)", "ignored": False, "action_text": "", "tag_text": ""})
 
             if self.selected_index >= len(self.file_items):
                 self.selected_index = 0
@@ -121,21 +130,46 @@ class App:
         except Exception as e:
             self.git.log(f"刷新文件列表异常: {e}", "NOTE")
 
+    def _read_gitignore(self):
+        """简化的 .gitignore 解析（支持基本 glob 和 ! 取反，尾部空白已忽略）
+        注意：不支持 ** 递归匹配、目录通配、路径模式等完整 gitignore 规范。
+        仅用于 UI 显示"已忽略"标签，不影响实际 git 操作。"""
+        gitignore_path = os.path.join(self.git.cwd, ".gitignore")
+        if not os.path.exists(gitignore_path):
+            return [], []
+        patterns = []
+        negations = []
+        with open(gitignore_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.rstrip()  # 忽略尾部空白（gitignore 规范）
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith("!"):
+                    neg = line[1:].rstrip("/")
+                    if neg:
+                        negations.append(neg)
+                else:
+                    pat = line.rstrip("/")
+                    if pat:
+                        patterns.append(pat)
+        return patterns, negations
+
+    def _is_gitignored(self, name, patterns, negations):
+        """检查文件名是否匹配 gitignore 规则（支持 glob 和取反）"""
+        for pat in patterns:
+            if fnmatch.fnmatch(name, pat):
+                for neg in negations:
+                    if fnmatch.fnmatch(name, neg):
+                        return False
+                return True
+        return False
+
     def load_releases(self):
-        self.release_items = []
         commits = self.git.get_recent_commits()
-        for commit in commits:
-            self.release_items.append({
-                "name": commit["hash"][:8],
-                "time": commit["time"],
-                "action_text": "恢复",
-            })
-        if not self.release_items:
-            self.release_items.append({
-                "name": "(无提交)",
-                "time": "",
-                "action_text": "",
-            })
+        self.release_items = [
+            {"name": c["hash"][:8], "time": c["time"], "action_text": "恢复"}
+            for c in commits
+        ] or [{"name": "(无提交)", "time": "", "action_text": ""}]
 
     def do_first_sync(self):
         """基本初始化：创建 .gitignore、初始化仓库、配置远程，但不执行推送"""
@@ -154,20 +188,27 @@ class App:
         self.refresh_file_list()
 
     def build_main_box(self):
-        box_width = 60
+        box_width = self.BOX_WIDTH
         TL, TR = '╭', '╮'
         BL, BR = '╰', '╯'
         H, V = '─', '│'
         style_sel = Style(bgcolor="#585B70", color="#CDD6F4", bold=True)
 
+        lines = [Text(f"{TL}{H * (box_width - 2)}{TR}", style=STYLE_DEFAULT)]
+        lines.extend(self._build_mode_indicator(box_width, style_sel, V, H))
+        lines.extend(self._build_status_section(box_width, V))
+        lines.extend(self._build_file_list_section(box_width, V, H))
+        lines.append(Text(f"{BL}{H * (box_width - 2)}{BR}", style=STYLE_DEFAULT))
+        return Group(*lines)
+
+    def _build_mode_indicator(self, box_width, style_sel, V, H):
+        """构建模式指示器和引信动画行"""
         lines = []
-        lines.append(Text(f"{TL}{H * (box_width - 2)}{TR}", style=STYLE_DEFAULT))
-
-        # ── 模式指示器 ──
-        mode_names = ["推送模式", "恢复模式"]
         inner_width = box_width - 2
-        each_mode_w = inner_width // 2
 
+        # 模式选择行
+        mode_names = ["推送模式", "恢复模式"]
+        each_mode_w = inner_width // 2
         mode_line = Text()
         mode_line.append(V, style=STYLE_DEFAULT)
         for i, name in enumerate(mode_names):
@@ -183,6 +224,7 @@ class App:
         mode_line.append(V, style=STYLE_DEFAULT)
         lines.append(mode_line)
 
+        # 引信动画行
         fuse_line = Text()
         fuse_line.append("├", style=STYLE_DEFAULT)
         fuse_remaining = self._fuse_remaining()
@@ -196,9 +238,13 @@ class App:
             fuse_line.append(H * inner_width, style=STYLE_DEFAULT)
         fuse_line.append("┤", style=STYLE_DEFAULT)
         lines.append(fuse_line)
+        return lines
 
-        # ── 状态区 ──
+    def _build_status_section(self, box_width, V):
+        """构建状态区（项目、分支、远程、版本）"""
+        lines = []
         status = self._get_status()
+
         if status["initialized"]:
             status_entries = [
                 ("项目: ", STYLE_DEFAULT, os.path.basename(self.git.cwd), STYLE_WHITE),
@@ -208,15 +254,10 @@ class App:
             remote_line = Text()
             remote_line.append("远程: ", style=STYLE_DEFAULT)
             remote_raw = status["remote"]
-            if remote_raw.startswith("git@"):
-                osc_url = f"https://{remote_raw[len('git@'):].replace(':', '/', 1)}"
-            elif remote_raw.startswith("http"):
-                osc_url = remote_raw
-            else:
-                osc_url = f"https://{remote_raw}"
+            osc_url = App._to_https_url(remote_raw) if remote_raw != "未配置" else ""
 
             if remote_raw != "未配置":
-                remote_line.append(remote_raw, style=Style(link=osc_url, color="#F9E2AF"))
+                remote_line.append(osc_url, style=Style(link=osc_url, color="#F9E2AF"))
             else:
                 remote_line.append("未配置", style=STYLE_DIM)
 
@@ -241,8 +282,22 @@ class App:
 
         self._add_box_line(lines, remote_line, box_width, V)
         self._add_box_line(lines, version_line, box_width, V)
+        return lines
 
-        # ── 列表区 ──
+    def _build_scroll_indicator(self, V, inner_width):
+        ind = Text()
+        ind.append(V, style=STYLE_DEFAULT)
+        ind.append("    ")
+        ind.append("...", style=STYLE_DIM)
+        ind.append(" " * (inner_width - 7))
+        ind.append(V, style=STYLE_DEFAULT)
+        return ind
+
+    def _build_file_list_section(self, box_width, V, H):
+        """构建文件/版本列表区（含滚动指示器）"""
+        inner = box_width - 2
+        lines = []
+
         if self.mode == 0:
             items = self.file_items
             sel_idx = self.selected_index
@@ -252,123 +307,112 @@ class App:
             sel_idx = self.selected_index
             show_list = True
 
-        if show_list and items:
-            # 列表区顶部横隔线
-            sep = Text()
-            sep.append("│", style=STYLE_DEFAULT)
-            sep.append(" " + "─" * (box_width - 4) + " ", style=STYLE_DEFAULT)
-            sep.append("│", style=STYLE_DEFAULT)
-            lines.append(sep)
+        if not (show_list and items):
+            return lines
 
-            try:
-                term_height = shutil.get_terminal_size().lines
-            except Exception:
-                term_height = 24
-            reserved = 6 + 8
-            max_height = max(3, term_height - reserved)
+        # 列表区顶部横隔线
+        sep = Text()
+        sep.append("│", style=STYLE_DEFAULT)
+        sep.append(" " + "─" * (box_width - 4) + " ", style=STYLE_DEFAULT)
+        sep.append("│", style=STYLE_DEFAULT)
+        lines.append(sep)
 
-            display_start = 0
-            display_items = items
-            show_top = False
-            show_bottom = False
+        try:
+            term_height = shutil.get_terminal_size().lines
+        except Exception:
+            term_height = 24
+        reserved = 6 + 8
+        max_height = max(3, term_height - reserved)
 
-            if len(items) > max_height:
-                half = max_height // 2
-                display_start = max(0, sel_idx - half)
-                end = min(len(items), display_start + max_height)
-                if end == len(items):
-                    display_start = max(0, end - max_height)
-                display_items = items[display_start:end]
-                show_top = display_start > 0
-                show_bottom = (display_start + len(display_items)) < len(items)
+        display_start = 0
+        display_items = items
+        show_top = False
+        show_bottom = False
 
-            if show_top:
-                ind = Text()
-                ind.append(V, style=STYLE_DEFAULT)
-                ind.append("    ")
-                ind.append("...", style=STYLE_DIM)
-                ind.append(" " * (box_width - 8 - 1))
-                ind.append(V, style=STYLE_DEFAULT)
-                lines.append(ind)
+        if len(items) > max_height:
+            half = max_height // 2
+            display_start = max(0, sel_idx - half)
+            end = min(len(items), display_start + max_height)
+            if end == len(items):
+                display_start = max(0, end - max_height)
+            display_items = items[display_start:end]
+            show_top = display_start > 0
+            show_bottom = (display_start + len(display_items)) < len(items)
 
-            max_name_width = 0
-            for item in display_items:
-                w = get_display_width(item["name"])
-                if w > max_name_width:
-                    max_name_width = w
+        if show_top:
+            lines.append(self._build_scroll_indicator(V, inner))
 
-            for i, item in enumerate(display_items):
-                actual_index = display_start + i
-                is_selected = (actual_index == sel_idx)
-                name = item["name"]
+        max_name_width = 0
+        for item in display_items:
+            w = get_display_width(item["name"])
+            if w > max_name_width:
+                max_name_width = w
 
-                line = Text()
-                line.append(V, style=STYLE_DEFAULT)
-                line.append(" ")
+        for i, item in enumerate(display_items):
+            actual_index = display_start + i
+            is_selected = (actual_index == sel_idx)
+            name = item["name"]
 
-                if self.mode == 0:
-                    status_char = self.git.updated_items.get(name)
-                    if status_char == 'A':
-                        line.append("[+]", style=STYLE_GREEN)
-                    elif status_char == 'D':
-                        line.append("[-]", style=STYLE_RED)
-                    else:
-                        line.append("   ")
+            line = Text()
+            line.append(V, style=STYLE_DEFAULT)
+            line.append(" ")
 
-                if is_selected:
-                    if self.mode == 0 and item.get("ignored", False):
-                        name_style = Style(bgcolor="#31748F", bold=True, color="#CDD6F4", strike=True)
-                    else:
-                        name_style = STYLE_SELECTED
-                elif self.mode == 0 and item.get("ignored", False):
-                    name_style = STYLE_STRIKE
+            if self.mode == 0:
+                status_char = self.git.updated_items.get(name)
+                if status_char == 'A':
+                    line.append("[+]", style=STYLE_GREEN)
+                elif status_char == 'D':
+                    line.append("[-]", style=STYLE_RED)
                 else:
-                    name_style = STYLE_WHITE
-                line.append(f" {name}", style=name_style)
-                name_pad = max_name_width - get_display_width(name)
-                line.append(" " * name_pad, style=name_style if is_selected else None)
-                line.append(" ", style=name_style if is_selected else None)
+                    line.append("   ")
 
-                action_text = item.get("action_text", "")
-                if action_text:
-                    if is_selected and self.action_index == 1:
-                        if self.mode == 0:
-                            action_color = STYLE_GREEN if item.get("ignored", False) else STYLE_RED
-                        else:
-                            action_color = STYLE_GREEN
-                        line.append(f"  ")
-                        line.append(f" {action_text} ", style=Style(
-                            bgcolor="#31748F", bold=True,
-                            color=action_color.color if action_color.color else "#CDD6F4"
-                        ))
+            if is_selected:
+                if self.mode == 0 and item.get("ignored", False):
+                    name_style = Style(bgcolor="#31748F", bold=True, color="#CDD6F4", strike=True)
+                else:
+                    name_style = STYLE_SELECTED
+            elif self.mode == 0 and item.get("ignored", False):
+                name_style = STYLE_STRIKE
+            else:
+                name_style = STYLE_WHITE
+            line.append(f" {name}", style=name_style)
+            name_pad = max_name_width - get_display_width(name)
+            line.append(" " * name_pad, style=name_style if is_selected else None)
+            line.append(" ", style=name_style if is_selected else None)
+
+            action_text = item.get("action_text", "")
+            if action_text:
+                if is_selected and self.action_index == 1:
+                    if self.mode == 0:
+                        action_color = STYLE_GREEN if item.get("ignored", False) else STYLE_RED
                     else:
-                        line.append(f"   {action_text} ", style=STYLE_DIM)
+                        action_color = STYLE_GREEN
+                    line.append(f"  ")
+                    line.append(f" {action_text} ", style=Style(
+                        bgcolor="#31748F", bold=True,
+                        color=action_color.color if action_color.color else "#CDD6F4"
+                    ))
+                else:
+                    line.append(f"   {action_text} ", style=STYLE_DIM)
 
-                tag_text = item.get("tag_text", "")
-                if tag_text:
-                    line.append(f" {tag_text}", style=STYLE_DIM)
+            tag_text = item.get("tag_text", "")
+            if tag_text:
+                line.append(f" {tag_text}", style=STYLE_DIM)
 
-                # 恢复模式显示 commit 时间
-                if self.mode == 1 and item.get("time"):
-                    line.append(f"  {item['time']}", style=STYLE_DIM)
+            # 恢复模式显示 commit 时间
+            if self.mode == 1 and item.get("time"):
+                line.append(f"  {item['time']}", style=STYLE_DIM)
 
-                visible = get_display_width(line.plain)
-                padding = max(0, box_width - visible - 1)
-                line.append(" " * padding)
-                line.append(V, style=STYLE_DEFAULT)
-                lines.append(line)
+            visible = get_display_width(line.plain)
+            padding = max(0, box_width - visible - 1)
+            line.append(" " * padding)
+            line.append(V, style=STYLE_DEFAULT)
+            lines.append(line)
 
-            if show_bottom:
-                ind = Text()
-                ind.append(V, style=STYLE_DEFAULT)
-                ind.append("    ")
-                ind.append("...", style=STYLE_DIM)
-                ind.append(" " * (box_width - 8 - 1))
-                ind.append(V, style=STYLE_DEFAULT)
-                lines.append(ind)
+        if show_bottom:
+            lines.append(self._build_scroll_indicator(V, inner))
 
-        lines.append(Text(f"{BL}{H * (box_width - 2)}{BR}", style=STYLE_DEFAULT))
-        return Group(*lines)
+        return lines
 
     def _add_box_line(self, lines, content, box_width, V):
         line = Text()
@@ -382,11 +426,6 @@ class App:
         lines.append(line)
 
     def build_log_text(self):
-        try:
-            term_width = shutil.get_terminal_size().columns
-        except Exception:
-            term_width = 80
-
         try:
             term_height = shutil.get_terminal_size().lines
         except Exception:
@@ -445,7 +484,7 @@ class App:
             if not self.mode_locked and self.mode != 1:
                 self.mode = 1
             elif self.mode == 1 and self.mode_locked:
-                if self.release_items and self.release_items[0]["name"] != "(无版本)":
+                if self.release_items and self.release_items[0]["name"] != "(无提交)":
                     self.action_index = 1
         elif key == KEY_ENTER:
             if not self.mode_locked:
@@ -458,7 +497,7 @@ class App:
                     else:
                         self.action_index = 1
             else:
-                if self.release_items and self.release_items[0]["name"] != "(无版本)":
+                if self.release_items and self.release_items[0]["name"] != "(无提交)":
                     if self.action_index == 1:
                         self.execute_restore()
                     else:
@@ -487,7 +526,7 @@ class App:
     def execute_restore(self):
         item = self.release_items[self.selected_index]
         commit_hash = item["name"]
-        if commit_hash == "(无提交)" or self.first_sync_done:
+        if commit_hash == "(无提交)":
             return
 
         self.operation_in_progress = True
@@ -505,31 +544,26 @@ class App:
 
     def remove_from_github(self, item_name):
         with self.git.action(f"删除: {item_name}") as result:
-            s, m = run_command(f'git ls-files "{item_name}"', cwd=self.git.cwd)
+            s, m = run_command(["git", "ls-files", item_name], cwd=self.git.cwd)
             if s and m.strip():
-                s, m = run_command(f'git rm -r --cached "{item_name}"', cwd=self.git.cwd)
+                s, m = run_command(["git", "rm", "-r", "--cached", item_name], cwd=self.git.cwd)
                 if not s:
                     result.failed = True
                     result.detail = m
                     return
 
             self.add_to_gitignore(item_name)
-            run_command('git add .gitignore', cwd=self.git.cwd)
+            run_command(["git", "add", ".gitignore"], cwd=self.git.cwd)
 
-            msg = f"Delete: {item_name}"
-            s, m = run_command(f'git commit -m "{msg}"', cwd=self.git.cwd)
-            if not s and "nothing to commit" not in m.lower() and "no changes added to commit" not in m.lower():
-                result.failed = True
-                result.detail = m
-                return
+            ok, m = self._try_commit(f"Delete: {item_name}")
+            if not ok:
+                if m:  # 真实错误
+                    result.failed = True
+                    result.detail = m
+                return  # nothing to commit 或失败都应返回
 
-            if s:
-                status = self.git.get_status()
-                branch = status.get("branch", "main")
-                if branch == "未知" or not branch:
-                    branch = "main"
-
-                s, m = run_command(f"git push origin {branch}", cwd=self.git.cwd)
+            branch = self.git._current_branch()
+            s, m = run_command(["git", "push", "origin", branch], cwd=self.git.cwd)
             if not s:
                 result.failed = True
                 result.detail = self.git._parse_push_error(m)
@@ -569,29 +603,18 @@ class App:
     def push_to_github(self, item_name):
         with self.git.action(f"推送: {item_name}") as result:
             self.remove_from_gitignore(item_name)
-            run_command('git add .gitignore', cwd=self.git.cwd)
-            run_command(f'git add "{item_name}"', cwd=self.git.cwd)
+            run_command(["git", "add", ".gitignore"], cwd=self.git.cwd)
+            run_command(["git", "add", item_name], cwd=self.git.cwd)
 
-            msg = f"Add: {item_name}"
-            s, m = run_command(f'git commit -m "{msg}"', cwd=self.git.cwd)
-            if not s and "nothing to commit" not in m.lower() and "no changes added to commit" not in m.lower():
+            ok, m = self._try_commit(f"Add: {item_name}")
+            if not ok and m:  # 真实错误（nothing to commit 不算失败）
                 result.failed = True
                 result.detail = m
                 self.refresh_file_list()
                 return
 
-            if not s:
-                result.failed = True
-                result.detail = "没有新文件需要推送"
-                self.refresh_file_list()
-                return
-
-            status = self.git.get_status()
-            branch = status.get("branch", "main")
-            if branch == "未知" or not branch:
-                branch = "main"
-
-            s, m = run_command(f"git push origin {branch}", cwd=self.git.cwd)
+            branch = self.git._current_branch()
+            s, m = run_command(["git", "push", "origin", branch], cwd=self.git.cwd)
             if s:
                 self.git.updated_items[item_name] = 'A'
             else:
@@ -605,7 +628,16 @@ class App:
         try:
             with open(gitignore_path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
-            new_lines = [line for line in lines if line.strip().rstrip("/") != item_name]
+            new_lines = []
+            for line in lines:
+                stripped = line.rstrip()
+                if not stripped or stripped.startswith("#") or stripped.startswith("!"):
+                    new_lines.append(line)
+                    continue
+                pat = stripped.rstrip("/")
+                if pat == item_name:
+                    continue  # 删除匹配的行
+                new_lines.append(line)
             with open(gitignore_path, "w", encoding="utf-8") as f:
                 f.writelines(new_lines)
         except Exception as e:
@@ -615,9 +647,7 @@ class App:
         import webbrowser
         status = self.git.get_status()
         if status["initialized"] and status["remote"] != "未配置":
-            remote_url = status["remote"]
-            if not remote_url.startswith("http"):
-                remote_url = f"https://{remote_url.replace('git@', '').replace(':', '/')}"
+            remote_url = self._to_https_url(status["remote"])
             with self.git.action("打开远程仓库") as result:
                 result.detail = remote_url
                 webbrowser.open(remote_url)
