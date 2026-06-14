@@ -188,6 +188,19 @@ class GitManager:
         s, _ = self._run_cmd(f"恢复到 {commit_hash[:8]}", ["git", "reset", "--hard", commit_hash])
         return s
 
+    @staticmethod
+    def _increment_alpha(seq):
+        """Excel风格字母递增: a→b, z→aa, az→ba, zz→aaa"""
+        s = list(seq)
+        i = len(s) - 1
+        while i >= 0:
+            if s[i] < 'z':
+                s[i] = chr(ord(s[i]) + 1)
+                return ''.join(s)
+            s[i] = 'a'
+            i -= 1
+        return 'a' + ''.join(s)
+
     def calculate_next_version(self):
         latest = self.get_latest_release()
         now = datetime.now()
@@ -199,7 +212,7 @@ class GitManager:
         if not latest:
             return f"{current_prefix}a"
 
-        m = re.match(r'^(\d{2}w\d{2})([a-z])$', latest)
+        m = re.match(r'^(\d{2}w\d{2})([a-z]+)$', latest)
         if not m:
             return f"{current_prefix}a"
 
@@ -207,11 +220,8 @@ class GitManager:
         prev_seq = m.group(2)
 
         if prev_prefix == current_prefix:
-            next_char = chr(ord(prev_seq) + 1)
-            if next_char > 'z':
-                self.log("版本序列已达上限 z，将使用 z", "NOTE")
-                next_char = 'z'
-            return f"{current_prefix}{next_char}"
+            next_seq = self._increment_alpha(prev_seq)
+            return f"{current_prefix}{next_seq}"
         else:
             return f"{current_prefix}a"
 

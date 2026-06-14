@@ -40,6 +40,7 @@ class App:
         self.cooldown_until = 0
         self.startup_start = time.time()
         self.task_done_time = None
+        self.restore_task_done = False
         self._cached_status = None
         self._cached_release = None
         self._cache_miss_sentinel = object()
@@ -84,6 +85,9 @@ class App:
     def _fuse_remaining(self):
         if not self.mode_locked:
             return MODE_TIMEOUT - (time.time() - self.startup_start)
+        # 恢复模式：未完成过恢复任务则不启动倒计时
+        if self.mode == 1 and not self.restore_task_done:
+            return None
         if self.task_done_time:
             return MODE_TIMEOUT - (time.time() - self.task_done_time)
         return None
@@ -534,6 +538,7 @@ class App:
             success = self.git.restore_to_commit(commit_hash)
             if success:
                 self.first_sync_done = True
+                self.restore_task_done = True
                 self._refresh_caches()
                 self.refresh_file_list()
         finally:
