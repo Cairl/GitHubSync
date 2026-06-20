@@ -172,7 +172,8 @@ python -m src
 
 ## Testing Instructions
 
-- 项目当前无自动化测试套件
+- 测试文件位于 `tests/` 目录，使用 `pytest` 运行
+- 运行全部测试：`python -m pytest tests/`
 - 手动验证：在测试目录中运行 `python -m src`，观察同步行为
 - 验证关注点：
   - 首次运行应自动初始化 Git 仓库并创建 `.gitignore`
@@ -225,7 +226,7 @@ python -m src
   - `timeout` → 连接超时
   - `authentication failed` / `403` → 认证异常
   - `repository not found` / `404` → 仓库不存在
-  - `rejected` + `non-fast-forward` → 推送被拒绝
+  - `rejected` + (`non-fast-forward` 或 `fetch first`) → 推送被拒绝
   - `schannel` / `certificate` / `ssl` → SSL 证书验证异常
   - `everything up-to-date` → 无需推送
 - 无法识别的错误回退显示 `未知错误: ` + 原始英文信息

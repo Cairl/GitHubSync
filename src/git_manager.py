@@ -442,7 +442,7 @@ class GitManager:
             return "仓库不存在或没有访问权限"
         if "schannel" in m or "certificate" in m or "ssl" in m:
             return "SSL 证书验证异常，请检查系统根证书或代理设置"
-        if "rejected" in m and "non-fast-forward" in m:
+        if "rejected" in m and ("non-fast-forward" in m or "fetch first" in m):
             return "推送被拒绝，远程仓库有更新未同步"
         if "everything up-to-date" in m:
             return "无需推送，所有内容已是最新"
