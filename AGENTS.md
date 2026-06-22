@@ -55,7 +55,9 @@ git_manager.py — Git 逻辑层
     ├── action()            # 上下文管理器：进入时记录"正在"，退出时原地替换为"完成"或"失败"
     ├── get_status()        # 获取仓库状态（分支、远程地址）
     ├── init_repo()         # 初始化 Git 仓库
-    ├── create_ignore()     # 创建默认 .gitignore
+    ├── create_ignore()     # 创建默认 .gitignore（含 changelog.md）
+    ├── _ensure_gitignore_entry() # 确保 .gitignore 包含指定条目
+    ├── _exclude_from_index() # 从索引排除文件（已跟踪则 rm --cached，未跟踪则 reset）
     ├── get_github_username() # 获取 GitHub 用户名（gh api → git remote → 邻近仓库）
     ├── get_repo_slug()     # 获取仓库 slug（owner/repo）
     ├── get_latest_release() # 获取最新 Release 标签名
@@ -65,7 +67,7 @@ git_manager.py — Git 逻辑层
     ├── restore_to_commit()  # 恢复到指定 commit（reset --hard）
     ├── calculate_next_version() # 计算下一版本号（YYwWWa 格式，周内递增字母）
     ├── configure_remote()  # 自动配置远程仓库（基于 GitHub 用户名 + 目录名，无交互）
-    ├── sync()              # 核心同步流程：扫描→暂存→提交→推送→发布Release
+    ├── sync()              # 核心同步流程：扫描→排除changelog.md→提交→推送→发布Release
     ├── create_github_repo() # 创建 GitHub 仓库（浏览器 + 轮询检测）
     ├── force_push()        # 强制推送（含错误解析）
     ├── publish_release()   # 发布 GitHub Release
@@ -85,7 +87,7 @@ app.py — TUI 应用层
     ├── build_main_box()    # 构建统一圆角框（模式切换 + 状态 + 列表）
     ├── build_log_text()    # 构建日志文本（无边框）
     ├── build_screen()      # 组合完整屏幕（Group）
-    ├── handle_key()        # 按键分发（根据 mode 分流）
+    ├── handle_key()        # 按键分发（根据 mode 分流；锁定后左右键切换操作焦点）
     ├── refresh_file_list() # 扫描目录生成文件列表
     ├── execute_action()    # 推送模式：执行删除/推送操作
     ├── execute_restore()   # 恢复模式：恢复到选中的 commit

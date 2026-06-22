@@ -83,7 +83,7 @@ class GitManager:
         if os.path.exists(gitignore_path):
             return
 
-        content = "__pycache__/\n*.pyc\n.env\n.DS_Store\n.vscode/\n.idea/\ndist/\nbuild/\n*.spec\nvenv/\nrun_sync.bat\n"
+        content = "__pycache__/\n*.pyc\n.env\n.DS_Store\n.vscode/\n.idea/\ndist/\nbuild/\n*.spec\nvenv/\nrun_sync.bat\nchangelog.md\n"
         with self.action("创建 .gitignore") as result:
             try:
                 with open(gitignore_path, "w", encoding="utf-8") as f:
@@ -131,6 +131,32 @@ class GitManager:
             pass
 
         return None
+
+    def _ensure_gitignore_entry(self, entry):
+        """确保 .gitignore 包含指定条目（已有则跳过）"""
+        gitignore_path = os.path.join(self.cwd, ".gitignore")
+        if not os.path.exists(gitignore_path):
+            return
+        try:
+            with open(gitignore_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            existing = {line.strip() for line in lines if line.strip()}
+            if entry not in existing:
+                with open(gitignore_path, "a", encoding="utf-8") as f:
+                    f.write(f"\n{entry}\n")
+        except OSError:
+            pass
+
+    def _exclude_from_index(self, filename):
+        """从 Git 索引中排除指定文件：已跟踪则移除跟踪（保留本地），未跟踪则取消暂存"""
+        filepath = os.path.join(self.cwd, filename)
+        if not os.path.exists(filepath):
+            return
+        s_tracked, _ = run_command(["git", "ls-files", "--error-unmatch", filename], cwd=self.cwd)
+        if s_tracked:
+            run_command(["git", "rm", "--cached", filename], cwd=self.cwd)
+        else:
+            run_command(["git", "reset", "HEAD", "--", filename], cwd=self.cwd)
 
     def get_repo_slug(self):
         s, m = run_command(["git", "remote", "-v"], cwd=self.cwd)
@@ -309,6 +335,7 @@ class GitManager:
 
     def sync(self):
         self.create_ignore()
+        self._ensure_gitignore_entry("changelog.md")
 
         status = self.get_status()
         if not status["initialized"]:
@@ -318,6 +345,9 @@ class GitManager:
         s, m = self._run_cmd("扫描", ["git", "add", "."])
         if not s:
             return
+
+        # changelog.md 仅用于 Release 发布，不进入 Git 历史
+        self._exclude_from_index("changelog.md")
 
         s, st = run_command(["git", "status", "--porcelain"], cwd=self.cwd)
         self.updated_items = {}
@@ -331,6 +361,8 @@ class GitManager:
                     path = path.split(" -> ")[-1].strip().strip('"')
                 parts = re.split(r'[\\/]', path)
                 if parts:
+                    if parts[0] == "changelog.md":
+                        continue
                     self.updated_items[parts[0]] = 'D' if status_char == 'D' else 'A'
 
             msg = f"Update: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"

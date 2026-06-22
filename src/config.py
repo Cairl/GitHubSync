@@ -11,7 +11,7 @@ STYLE_GRAY      = Style(color="#6C7086")
 STYLE_DEFAULT   = Style()
 STYLE_WHITE     = Style(color="#CDD6F4")
 STYLE_STRIKE    = Style(strike=True, dim=True)
-STYLE_SELECTED  = Style(bgcolor="#31748F", bold=True, color="#CDD6F4")
+STYLE_SELECTED  = Style(bgcolor="#CDD6F4", bold=True, color="#11111B")
 STYLE_LINK      = Style(color="#89B4FA", underline=True)
 
 # ─── 日志样式 ───────

@@ -196,7 +196,7 @@ class App:
         TL, TR = '╭', '╮'
         BL, BR = '╰', '╯'
         H, V = '─', '│'
-        style_sel = Style(bgcolor="#585B70", color="#CDD6F4", bold=True)
+        style_sel = Style(bgcolor="#CDD6F4", color="#11111B", bold=True)
 
         lines = [Text(f"{TL}{H * (box_width - 2)}{TR}", style=STYLE_DEFAULT)]
         lines.extend(self._build_mode_indicator(box_width, style_sel, V, H))
@@ -372,7 +372,7 @@ class App:
 
             if is_selected:
                 if self.mode == 0 and item.get("ignored", False):
-                    name_style = Style(bgcolor="#31748F", bold=True, color="#CDD6F4", strike=True)
+                    name_style = Style(bgcolor="#CDD6F4", bold=True, color="#11111B", strike=True)
                 else:
                     name_style = STYLE_SELECTED
             elif self.mode == 0 and item.get("ignored", False):
@@ -388,13 +388,13 @@ class App:
             if action_text:
                 if is_selected and self.action_index == 1:
                     if self.mode == 0:
-                        action_color = STYLE_GREEN if item.get("ignored", False) else STYLE_RED
+                        action_color = "#40A02B" if item.get("ignored", False) else "#D20F39"
                     else:
-                        action_color = STYLE_GREEN
+                        action_color = "#40A02B"
                     line.append(f"  ")
                     line.append(f" {action_text} ", style=Style(
-                        bgcolor="#31748F", bold=True,
-                        color=action_color.color if action_color.color else "#CDD6F4"
+                        bgcolor="#CDD6F4", bold=True,
+                        color=action_color
                     ))
                 else:
                     line.append(f"   {action_text} ", style=STYLE_DIM)
@@ -484,9 +484,14 @@ class App:
         elif key == KEY_LEFT:
             if not self.mode_locked and self.mode != 0:
                 self.mode = 0
+            elif self.mode_locked and self.mode == 0:
+                self.action_index = 0
         elif key == KEY_RIGHT:
             if not self.mode_locked and self.mode != 1:
                 self.mode = 1
+            elif self.mode_locked and self.mode == 0:
+                if self.file_items and self.file_items[self.selected_index]["name"] != "(空目录)":
+                    self.action_index = 1
             elif self.mode == 1 and self.mode_locked:
                 if self.release_items and self.release_items[0]["name"] != "(无提交)":
                     self.action_index = 1
