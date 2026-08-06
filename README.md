@@ -85,14 +85,20 @@ GitHubSync/
 ├── requirements.txt          # Python 依赖
 ├── changelog.md              # 版本更新日志（供 Release 读取）
 ├── AGENTS.md                 # 开发文档
+├── tests/                    # pytest 单测（FakeProvider 注入，无需真实 git/gh）
 └── src/
-    ├── __init__.py           # 包入口，版本号 2.0.0
-    ├── __main__.py           # 启动入口，参数解析
-    ├── app.py                # TUI 主应用：渲染、键盘处理、交互逻辑
+    ├── __init__.py           # 包入口，版本号 2.1.0
+    ├── __main__.py           # 组合根：唯一组装依赖的地方（create_app）
     ├── config.py             # 颜色主题、键盘映射、布局常量
-    ├── git_manager.py        # Git 操作封装：状态、同步、发布 Release
-    └── utils.py              # 工具函数：VT100、输入、命令执行
+    ├── utils.py              # 工具函数：VT100、按键、宽度计算
+    ├── domain/               # 领域层：异常体系、事件总线、协议接口、状态机（零 I/O）
+    ├── application/          # 应用层：同步/恢复/发布/文件级操作 四类用例服务（可单测）
+    ├── infrastructure/       # 基础设施层：git/gh CLI 适配器、gitignore 解析（可替换）
+    └── presentation/         # 表现层：Rich Live 主循环、渲染器、模式组件（策略模式）
 ```
+
+> 架构细节见 `docs/architecture-refactor.md`。依赖规则：表现层 → 应用层 → 领域层 → 基础设施层，
+> 接口定义在领域层、实现在基础设施层，新增模式 = 实现 Mode 协议 + 注册一行。
 
 ## 配置说明
 
