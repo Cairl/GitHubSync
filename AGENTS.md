@@ -40,7 +40,7 @@ config.py — 常量层
 ├── STYLE_*              # Rich Style 对象（Catppuccin Mocha 配色）
 ├── LEVEL_STYLES/LABELS  # 日志级别样式和时态标签（正在/完成/失败/注意）
 ├── KEY_*                # 键盘扫描码常量
-└── *_HEIGHT/TIMEOUT     # 布局和超时参数
+└── *_HEIGHT             # 布局尺寸参数
 
 utils.py — 工具函数层
 ├── enable_vt100()       # 启用 Windows VT100 终端处理
@@ -60,9 +60,10 @@ git_manager.py — Git 逻辑层
     ├── _exclude_from_index() # 从索引排除文件（已跟踪则 rm --cached，未跟踪则 reset）
     ├── get_github_username() # 获取 GitHub 用户名（gh api → git remote → 邻近仓库）
     ├── get_repo_slug()     # 获取仓库 slug（owner/repo）
-    ├── get_latest_release() # 获取最新 Release 标签名
+    ├── get_latest_release() # 获取最新 Release 信息（标签 + 发布时间）
     ├── get_all_releases()   # 获取所有 Release 标签列表（最多 20 个）
     ├── get_recent_commits() # 获取最近的 Git 提交历史（hash + 时间）
+    ├── get_change_count()   # 获取工作区变更文件数（git status --porcelain）
     ├── restore_to_tag()     # 恢复到指定 tag（fetch + reset --hard）
     ├── restore_to_commit()  # 恢复到指定 commit（reset --hard）
     ├── calculate_next_version() # 计算下一版本号（YYwWWa 格式，周内递增字母）
@@ -80,12 +81,13 @@ app.py — TUI 应用层
     ├── _on_git_log()       # GitManager 日志回调，触发 Live 更新
     ├── _get_status()       # 获取缓存的状态（懒加载）
     ├── _get_release()      # 获取缓存的 Release 信息（懒加载）
-    ├── _refresh_caches()   # 刷新状态和 Release 缓存
+    ├── _get_changes()      # 获取缓存的变更检测结果（懒加载）
+    ├── _refresh_caches()   # 刷新状态、Release 和变更缓存
     ├── load_releases()     # 加载 Git 提交历史列表（恢复模式确认后调用）
     ├── do_first_sync()     # 基本初始化（创建 .gitignore、init、配置 remote）
+    ├── _init_background()  # 后台线程执行初始化与缓存刷新（不阻塞界面渲染）
     ├── _on_mode_selected() # 模式确认后的初始化（推送模式执行 sync，恢复模式加载提交历史）
-    ├── build_main_box()    # 构建统一圆角框（模式切换 + 状态 + 列表）
-    ├── build_log_text()    # 构建日志文本（无边框）
+    ├── build_main_box()    # 构建左右两栏圆角框（左：模式+状态+日志，右：列表）
     ├── build_screen()      # 组合完整屏幕（Group）
     ├── handle_key()        # 按键分发（根据 mode 分流；锁定后左右键切换操作焦点）
     ├── refresh_file_list() # 扫描目录生成文件列表
@@ -97,7 +99,7 @@ app.py — TUI 应用层
     ├── remove_from_gitignore() # 从 .gitignore 移除条目
     ├── confirm_delete()    # 物理删除确认对话框
     ├── open_remote()       # 在浏览器中打开远程仓库
-    └── run()               # 主循环（Rich Live + msvcrt 按键）
+    └── run()               # 主循环（Rich Live + msvcrt 按键，启动即渲染框架，数据后台懒加载）
 ```
 
 ## Setup Commands
@@ -142,13 +144,14 @@ python -m src
 | `↑` `↓` | 切换选中项（文件 / 版本） |
 | `←` `→` | 移动模式光标（推送 / 恢复）或切换焦点到操作按钮 |
 | `Enter` | 确认模式选择（未锁定时）或执行操作（焦点在操作按钮时） |
-| `Esc` / `Q` | 取消确认对话框 |
+| `Esc` | 取消确认对话框 |
+| `Q` | 退出程序（任意阶段） |
 | `O` | 在浏览器中打开远程仓库 |
 
 - 操作执行后有 1 秒冷却期，防止误触
 - 推送模式：左键重置焦点，右键切到操作按钮
 - 恢复模式：右键切到操作按钮，Enter 确认恢复
-- 模式选择：启动时默认光标在推送模式，左右键移动光标，回车确认后锁定
+- 模式选择：启动时默认光标在推送模式，左右键移动光标，回车确认后锁定（无超时自动确认）
 
 ## Troubleshooting
 
@@ -182,14 +185,14 @@ python -m src
   - 文件列表正确显示目录内容
   - 删除/推送操作正确执行
   - 错误信息正确显示中文翻译
-  - 60 秒倒计时自动退出
+  - 按 Q 键可正常退出程序
 
 ## Code Style
 
 ### 命名规范
 - 类名: `PascalCase`（`GitManager`, `App`）
 - 函数/方法: `snake_case`（`get_display_width`, `refresh_file_list`）
-- 常量: `UPPER_SNAKE_CASE`（`STYLE_RED`, `KEY_ENTER`, `IDLE_TIMEOUT`）
+- 常量: `UPPER_SNAKE_CASE`（`STYLE_RED`, `KEY_ENTER`, `COOLDOWN_PERIOD`）
 - 私有方法: 前缀 `_`（`_parse_push_error`, `_refresh_caches`）
 
 ### 格式约定
@@ -200,22 +203,30 @@ python -m src
 
 ### TUI 渲染规则
 - 使用 Rich `Live` 组件进行全屏渲染，`refresh_per_second=4`
-- 屏幕由 `Group` 组合：`build_main_box()`（统一圆角框）+ `build_log_text()`（无边框日志）
-- 圆角框宽度固定 60 字符，内部包含模式切换栏、状态行、列表
-- 模式切换栏：顶部 `推送模式 | 恢复模式`，左右键移动光标，回车确认后锁定
-- 状态区统一显示：项目、分支、远程、版本（两种模式相同）
-- 列表区与顶部菜单之间有横隔线分隔
+- 屏幕由 `Group` 组成：`build_main_box()`（左右两栏圆角框，日志在左栏内，无独立日志面板）
+- 圆角框目标宽度 101 字符（`App.BOX_WIDTH`，左右栏各 49 保证奇数宽，虚线可首尾减号对称），终端不足时自动收缩；左右栏之间以竖线分隔，形似打开的书
+- 右栏顶部为模式导航栏，下方以减号虚线封闭并隔一个空行再接列表区
+- 左栏：模式选择导航栏 + 列表区
+- 模式选择导航栏：位于左栏顶部（`推送模式 | 恢复模式`，各占一半宽度，无横线竖线间隔），左右键移动光标，回车确认后锁定，选中模式整块背景高亮，下方隔一个空行接列表区
+- 右栏：状态区（项目/分支/主页/版本）、空行、日志区
+- 变更检测：选择模式前通过 `git status --porcelain` 统计变更文件数，有变更时在分支行后括号显示 `分支: main (3)`（默认色）
 - 推送模式显示文件列表（带 [+] / [-] 状态标记），恢复模式显示 Git 提交历史列表
 - 恢复模式列表显示 commit hash 和提交时间
-- 文件列表 padding 通过 `get_display_width(line.plain)` 直接测量行宽，确保右边框对齐
-- 文件名等宽填充至 `max_name_width`，使操作文字垂直对齐
+- 左右栏每行通过 `_merge_row()` 合并，padding 用 `get_display_width(line.plain)` 测量，确保竖线和右边框对齐
+- 恢复模式版本列表在栏内整体居中显示（按内容最大宽度计算统一缩进 `_pad_row`），保持列对齐；推送模式文件列表保持左对齐
+- 文件名等宽填充至 `max_name_width`（上限为右栏宽减固定开销），超宽用 `_truncate()` 截断加省略号
+- 状态区值和日志消息同样通过 `_truncate()` 截断，防止撑破边框
 - 滚动指示器 `...` 在文件列表超出可见区域时显示
 - 超链接使用 Rich `Style(link=url)` 替代手写 OSC 8 序列
 
 ### 渲染性能
-- **禁止在渲染路径中执行子进程调用**。`build_screen()` 只读取缓存，不调用 `git` 或 `gh`
-- 状态和 Release 信息缓存在 `App._cached_status` 和 `App._cached_release` 中
-- 缓存在初始同步完成后和每次操作（删除/推送）完成后通过 `_refresh_caches()` 刷新
+- **禁止在渲染路径中执行子进程调用**。`build_screen()` 只读取缓存，不调用 `git` 或 `gh`；`_get_status/_get_release/_get_changes` 均为纯读缓存，不触发刷新
+- 启动即渲染界面框架，缓存未就绪时状态区仅显示项目名、其余行留空（静默加载，无加载回显）；初始化（`do_first_sync` + `_refresh_caches` + `refresh_file_list`）在后台线程执行，完成后自动 `live.update` 刷新
+- 模式锁定（`_on_mode_selected`）前会 `join` 等待初始化线程结束，避免与同步操作并发访问仓库
+- 恢复模式预览：光标聚焦恢复模式（未锁定）即通过 `_ensure_releases_loaded()` 静默预加载提交历史（无占位回显，列表区留空），后台异步加载完成后自动刷新；已加载或加载中则不重复触发
+- 恢复模式占位项（`(加载中...)` / `(无提交)`）通过 `_restore_available()` 拦截，不可展开操作或执行恢复
+- 状态、Release 和变更信息缓存在 `App._cached_status`、`App._cached_release` 和 `App._cached_changes` 中
+- 缓存在后台初始化完成后和每次操作（删除/推送）完成后通过 `_refresh_caches()` 刷新
 - 使用 `object()` 哨兵值（`_cache_miss_sentinel`）区分"未缓存"和"缓存值为 None"
 - GitManager 的 `on_log` 回调在 Live 上下文中触发 `live.update()` 实现实时更新
 

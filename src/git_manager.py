@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import time
 import tempfile
 from datetime import datetime
@@ -166,15 +167,36 @@ class GitManager:
                 return f"{match.group(1)}/{match.group(2)}"
         return None
 
+    def get_change_count(self):
+        """返回工作区变更文件数（git status --porcelain）。无变更或未初始化返回 0"""
+        s, m = run_command(["git", "status", "--porcelain"], cwd=self.cwd)
+        if not s or not m:
+            return 0
+        return len([line for line in m.splitlines() if line.strip()])
+
     def get_latest_release(self):
+        """获取最新 Release 信息。返回 {"tag": 标签名, "published_at": 发布时间} 或 None"""
         repo_slug = self.get_repo_slug()
         if not repo_slug:
             return None
-        s, m = run_command(["gh", "release", "list", "--repo", repo_slug, "--limit", "1"])
+        s, m = run_command([
+            "gh", "release", "list", "--repo", repo_slug, "--limit", "1",
+            "--json", "tagName,publishedAt",
+        ])
         if s and m:
+            try:
+                data = json.loads(m)
+                if data:
+                    return {
+                        "tag": data[0].get("tagName", ""),
+                        "published_at": data[0].get("publishedAt", ""),
+                    }
+            except (ValueError, IndexError):
+                pass
+            # 回退：解析文本输出（首列为标签名）
             parts = m.split()
             if parts:
-                return parts[0]
+                return {"tag": parts[0], "published_at": ""}
         return None
 
     def get_all_releases(self):
@@ -238,7 +260,7 @@ class GitManager:
         if not latest:
             return f"{current_prefix}a"
 
-        m = re.match(r'^(\d{2}w\d{2})([a-z]+)$', latest)
+        m = re.match(r'^(\d{2}w\d{2})([a-z]+)$', latest.get("tag", ""))
         if not m:
             return f"{current_prefix}a"
 

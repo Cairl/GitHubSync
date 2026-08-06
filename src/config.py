@@ -46,14 +46,4 @@ KEY_O     = b"o"
 KEY_TAB   = b"\t"
 
 # ─── 超时设置 ───────
-IDLE_TIMEOUT = 60
 COOLDOWN_PERIOD = 1.0
-
-# ─── 布局尺寸 ───────
-STATUS_PANEL_HEIGHT = 6
-LOG_PANEL_HEIGHT = 8
-
-# ─── 引信倒计时 ───────
-MODE_TIMEOUT = 30
-FUSE_UNBURNT = "─"
-FUSE_BURNT = "┄"
