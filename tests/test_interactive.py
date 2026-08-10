@@ -482,3 +482,45 @@ def test_files_view_shows_failed_marker_after_push_fail(tmp_path):
     view.run()
     joined = "\n".join(out_lines)
     assert "[!]" in joined              # 失败标记出现
+
+
+# ── 无回显化：拉取视图青色版本标注 ──
+def test_pull_view_marks_remote_head_cyan():
+    """本地与远程一致的提交 hash 用青色标注，其余不变色。
+
+    颜色验证走 _render_label 纯函数（测试环境无 tty，Rich 不产 ANSI 色码）；
+    集成断言 run() 正确记录远程一致版本且两行均渲染。
+    """
+    from tui.restore_view import RestoreView as RV
+    svc = make_tui_services(initialized=True, remote="x")
+    svc.git.commits = ["abcdef1234567890", "fedcba9876543210"]
+    svc.git.remote_head_hash = "fedcba9876543210"  # 远程指向较旧提交
+    out_lines = []
+    view = RestoreView(svc.restore, svc.git,
+                       key_source=scripted([KEY_BACKSPACE]),
+                       out=out_lines.append)
+    view.run()
+    assert view._remote_head == "fedcba9876543210"  # 视图记录了远程一致版本
+    block = out_lines[0]
+    assert "fedcba98" in block and "abcdef12" in block  # 两行均渲染
+    # markup 层：命中行 hash 包青色，其余不变色
+    rv = RV(svc.restore, svc.git)
+    rv._remote_head = "fedcba9876543210"
+    assert "[#39C5CF]fedcba98[/]" in rv._render_label(
+        "fedcba9876543210", "2026-01-01 00:00:00")
+    assert "[#39C5CF]" not in rv._render_label(
+        "abcdef1234567890", "2026-01-01 00:00:00")
+
+
+def test_pull_view_no_cyan_when_remote_head_absent():
+    """remote_head 为 None（无远程/未 fetch）或列表内不存在时无青色。"""
+    from tui.restore_view import RestoreView as RV
+    svc = make_tui_services(initialized=True, remote="x")
+    svc.git.commits = ["abcdef1234567890"]
+    view = RV(svc.restore, svc.git)
+    view._remote_head = None
+    assert "[#39C5CF]" not in view._render_label("abcdef1234567890", "2026-01-01 00:00:00")
+    view._remote_head = "9999999999999999"  # 列表内不存在
+    assert "[#39C5CF]" not in view._render_label("abcdef1234567890", "2026-01-01 00:00:00")
+    view._remote_head = "abcdef1234567890"
+    assert "[#39C5CF]abcdef12[/]" in view._render_label("abcdef1234567890", "2026-01-01 00:00:00")

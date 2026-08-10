@@ -16,8 +16,8 @@ from __future__ import annotations
 
 from typing import Callable
 
-from core.config import (COLOR_MENU_ACTIVE_BG, KEY_BACKSPACE, KEY_DOWN,
-                         KEY_ENTER, KEY_ESC, KEY_UP)
+from core.config import (COLOR_CYAN, COLOR_MENU_ACTIVE_BG, KEY_BACKSPACE,
+                         KEY_DOWN, KEY_ENTER, KEY_ESC, KEY_UP)
 from core.i18n import tr
 from core.protocols import GitProvider
 from core.restore_service import RestoreService
@@ -43,11 +43,20 @@ class RestoreView:
         self._out = out
         self._render_body = render_body
         self._max_rows = max_rows  # 列表可见窗口高度（None = 全部）
+        self._remote_head: str | None = None  # origin/<branch> 指向的提交 hash
 
     def _items(self) -> list[tuple[str, str]]:
-        """(标签, commit hash) 列表，最新在前（get_recent_commits 倒序）。"""
-        return [(f"{c['hash'][:8]}  {c['time']}", c["hash"])
+        """[(hash, time)] 列表，最新在前；顺带记录远程跟踪引用指向的提交。"""
+        self._remote_head = self.git.remote_head(self.git.current_branch())
+        return [(c["hash"], c["time"])
                 for c in self.git.get_recent_commits(20)]
+
+    def _render_label(self, hash_: str, time_: str) -> str:
+        """单行文本：hash 段命中远程一致版本时包青色 markup，否则原样。"""
+        text = f"{hash_[:8]}  {time_}"
+        if self._remote_head and hash_ == self._remote_head:
+            return f"[{COLOR_CYAN}]{hash_[:8]}[/]  {time_}"
+        return text
 
     def run(self) -> None:
         items = self._items()
@@ -71,13 +80,15 @@ class RestoreView:
             start = max(0, min(index - half, len(items) - visible))
             window = items[start:start + visible]
             lines: list[str] = []
-            for i, (label, _) in enumerate(window):
+            for i, (h, t) in enumerate(window):
+                label = self._render_label(h, t)
                 if start + i == index:
                     # 与导航栏/文件视图光标同款：› 箭头 + #636363 底色框选
                     lines.append(markup_to_ansi(
                         f"[bold on {COLOR_MENU_ACTIVE_BG}] › {label} [/]"))
                 else:
-                    lines.append(f"   {label} ")
+                    # 统一经 markup_to_ansi：青色命中行在未选中时也能正确着色
+                    lines.append(markup_to_ansi(f"   {label} "))
             text = "\n".join(lines)
             if self._render_body is not None:
                 self._render_body(text)
@@ -98,7 +109,7 @@ class RestoreView:
                 # Enter 直接执行选中项（无二次确认，用户已确认）
                 if self._render_body is None:
                     block.clear()
-                _, commit_hash = items[index]
+                commit_hash, _ = items[index]
                 if index == 0:
                     # 光标默认首个（最新提交）= 最新的对齐：fetch + reset origin/branch
                     self.restore.restore_remote()
