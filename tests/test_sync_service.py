@@ -71,29 +71,34 @@ def test_sync_repo_not_found_recovers(tmp_path):
     assert git.remote == gh.repo_created_url
 
 
-def test_sync_rejected_raises_without_force(tmp_path):
+def test_sync_rejected_auto_force_push(tmp_path):
     sync, git, gh, bus, _ = make_services(str(tmp_path))
     git.init_repo()
     git.remote = "https://github.com/octocat/repo"
     git.files["c.txt"] = "data"
     git.fail_mode = "rejected"
+
+    logs = []
+    bus.subscribe(ActionLog, logs.append)
+
+    result = sync.run()
+
+    assert result.pushed is True
+    assert git.force_push_calls == 1  # 分叉自动强推
+    assert any("force pushing" in e.message for e in logs)
+
+
+def test_sync_rejected_force_push_fails_raises(tmp_path):
+    sync, git, gh, bus, _ = make_services(str(tmp_path))
+    git.init_repo()
+    git.remote = "https://github.com/octocat/repo"
+    git.files["c.txt"] = "data"
+    git.fail_mode = "rejected"
+    git.force_fail = True  # 强推仍失败（如分支保护）
 
     with pytest.raises(PushRejectedError):
         sync.run()
 
-    assert git.force_push_calls == 0  # 不再自动强推
-
-
-def test_sync_rejected_force_push_when_explicit(tmp_path):
-    sync, git, gh, bus, _ = make_services(str(tmp_path))
-    git.init_repo()
-    git.remote = "https://github.com/octocat/repo"
-    git.files["c.txt"] = "data"
-    git.fail_mode = "rejected"
-
-    result = sync.run(force=True)
-
-    assert result.pushed is True
     assert git.force_push_calls == 1
 
 
@@ -157,6 +162,7 @@ def test_restore_remote_resets_to_origin(tmp_path):
     assert svc.restore_remote() is True
     assert git.reset_to == "origin/main"
     assert git.fetch_calls == 1
+    assert git.clean_calls == 1  # 1:1 复刻：reset 后清理未跟踪文件
 
 
 def test_restore_remote_fetch_failure(tmp_path):
@@ -164,3 +170,19 @@ def test_restore_remote_fetch_failure(tmp_path):
     git.init_repo()
     git.fetch_ok = False
     assert RestoreService(git, DomainEventBus()).restore_remote() is False
+    assert git.clean_calls == 0
+
+
+def test_restore_remote_clean_failure(tmp_path):
+    bus = DomainEventBus()
+    git = FakeGitProvider()
+    git.init_repo()
+    git.remote = "https://github.com/octocat/repo"
+    git.clean_ok = False
+    failed = []
+    bus.subscribe(ActionLog, failed.append)
+
+    assert RestoreService(git, bus).restore_remote() is False
+    assert git.reset_to == "origin/main"  # reset 已执行
+    assert git.clean_calls == 1
+    assert any("clean" in e.message for e in failed)

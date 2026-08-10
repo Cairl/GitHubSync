@@ -115,30 +115,26 @@ def test_cmd_status_json():
 def test_cmd_push_yes_success():
     svc = make_services(initialized=True, remote="x", files={"a.py": "1"})
     code, _, err = run(commands.cmd_push,
-                      Args(yes=True, force=False, quiet=False, verbose=False), svc)
+                      Args(yes=True, quiet=False, verbose=False), svc)
     assert code == EXIT_OK and "[OK]" in err
 
 
-def test_cmd_push_diverged_requires_force():
-    svc = make_services(initialized=True, remote="x", ahead=1, behind=1)
-    code, _, err = run(commands.cmd_push,
-                      Args(yes=True, force=False, quiet=False, verbose=False), svc)
-    assert code == EXIT_DIVERGED and "--force" in err
-
-
-def test_cmd_push_diverged_with_force():
-    svc = make_services(initialized=True, remote="x", ahead=1, behind=1)
-    code, _, _ = run(commands.cmd_push,
-                     Args(yes=True, force=True, quiet=False, verbose=False), svc)
-    assert code == EXIT_OK
-
-
-def test_cmd_push_rejected_maps_to_diverged_exit():
+def test_cmd_push_diverged_auto_force():
+    """分叉时推送自动强推（本地 1:1 覆盖远程），不再需要 --force。"""
     svc = make_services(initialized=True, remote="x", files={"a": "1"},
                         fail_mode="rejected")
     code, _, _ = run(commands.cmd_push,
-                     Args(yes=True, force=False, quiet=False, verbose=False), svc)
-    assert code == EXIT_DIVERGED
+                     Args(yes=True, quiet=False, verbose=False), svc)
+    assert code == EXIT_OK
+    assert svc.git.force_push_calls == 1
+
+
+def test_cmd_push_network_error_fails():
+    svc = make_services(initialized=True, remote="x", files={"a": "1"},
+                        fail_mode="network")
+    code, _, _ = run(commands.cmd_push,
+                     Args(yes=True, quiet=False, verbose=False), svc)
+    assert code == EXIT_FAILED
 
 
 # ── diff ──
@@ -214,7 +210,7 @@ def test_cmd_status_result_to_stdout_actionlog_to_stderr():
     # push 成功的 [OK] 诊断在 stderr，stdout 为空
     svc = make_services(initialized=True, remote="x", files={"a.py": "1"})
     code, out, err = run(commands.cmd_push,
-                         Args(yes=True, force=False, quiet=False, verbose=False), svc)
+                         Args(yes=True, quiet=False, verbose=False), svc)
     assert "[OK]" in err and out == ""
 
 

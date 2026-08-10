@@ -6,7 +6,7 @@ GitHubSync 是一个 Windows 终端同步工具，将本地目录同步到 GitHu
 - **CLI 子命令**：`status` / `push` / `restore` / `diff` / `info`，POSIX 输出契约（结果走 stdout、诊断走 stderr、isatty 着色、退出码 0/1/2/3）
 - **极简交互**：无子命令 + tty 时进入，顶栏常驻 + 内容区刷新，单键循环（`tui/interactive.py`）
 - **Release 发布**：检测到 `changelog.md` 时自动发布 GitHub Release
-- **自动创建仓库**、自动配置远程、分叉需显式 `--force`（不自动强推）
+- **自动创建仓库**、自动配置远程；推送 = 本地 1:1 覆盖远程（分叉自动强推），拉取 = 远程 1:1 复刻本地（reset + clean）
 
 - **语言**: Python 3.12+
 - **版本**: 3.0.0（定义于 `main.py`）
@@ -135,7 +135,7 @@ python -m main
 | `Backspace` / `Esc` | 从子视图返回主屏 |
 
 - 导航栏固定三项：`› 推送` `拉取` `文件`（`›` 标记光标，任何状态下一致，分叉时不再切换为恢复/强制推送）
-- 拉取视图（`restore_view.py`）：本地最近 20 条提交列表（最新在前），光标默认首个——Enter 对齐远程（fetch + reset --hard origin/分支）；其余提交 Enter 恢复到该历史版本（无二次确认）；无提交时提示并返回
+- 拉取视图（`restore_view.py`）：本地最近 20 条提交列表（最新在前），光标默认首个——Enter 对齐远程（fetch + reset --hard origin/分支 + clean -fd，本地 1:1 复刻远程，丢弃本地已提交独有内容与未跟踪文件）；其余提交 Enter 恢复到该历史版本（无二次确认）；无提交时提示并返回
 - 菜单渲染见 `tui/screen.py`：`MENU_ITEMS` 定义项序（即 ← → 移动顺序），`menu_for_action()` 把推荐动作映射为初始光标落点（diff/refresh 无菜单项，落推送）
 - 操作执行后有 1 秒冷却期，防止误触
 - 退出无专用按键：直接关闭终端窗口即可（Ctrl+C 兜底）
@@ -170,5 +170,5 @@ python -m main
 - **`gh` 命令找不到**：运行 `winget install --id GitHub.cli`
 - **推送失败（认证错误）**：运行 `gh auth login` 重新登录
 - **推送失败（仓库不存在）**：SyncService 自动打开浏览器创建仓库并重推
-- **推送被拒绝（分叉）**：显式 `--force`（CLI）或交互模式按 `f` 强制推送
+- **推送被拒绝（分叉）**：自动强推（本地 1:1 覆盖远程，丢弃远程独有提交）；强推仍被拒（如分支保护）时报错，改用 `githubsync restore --remote` 对齐远程
 - **终端显示乱码**：使用 Windows Terminal 或支持 VT100 的终端

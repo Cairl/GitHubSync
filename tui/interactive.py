@@ -19,7 +19,7 @@ from core.config import (COLOR_ERROR, COLOR_SUCCESS, COLOR_WARN,
                          KEY_BACKSPACE, KEY_ENTER, KEY_LEFT, KEY_O,
                          KEY_RIGHT)
 from core.events import ActionLog
-from core.exceptions import PushRejectedError, SyncError
+from core.exceptions import SyncError
 from core.i18n import tr
 from core.services import Services
 from core.status import RepoInfo, RepoStatus
@@ -257,14 +257,9 @@ class InteractiveApp:
             FilesView(self.svc.file_ops, self._key, self._out,
                       render_body=self._set_view).run()
 
-    def _push(self, force: bool = False) -> None:
+    def _push(self) -> None:
         try:
-            self.svc.sync.run(force=force)
-        except PushRejectedError as e:
-            self._logs.append(f"[X] {e.message}")
-            self._logs.append(tr("  用 ← → 选「拉取」后按 Enter 对齐远程（会丢弃本地差异）",
-                                 "  Use ← → to select Pull then Enter (discards local changes)"))
-            self._paint()
+            self.svc.sync.run()
         except SyncError as e:
             self._logs.append(f"[X] {e.message}")
             self._paint()

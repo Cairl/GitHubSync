@@ -9,7 +9,7 @@ import json
 import sys
 
 from core.events import ActionLog
-from core.exceptions import PushRejectedError, SyncError
+from core.exceptions import SyncError
 from core.i18n import tr
 from core.services import Services
 from core.status import RepoStatus
@@ -55,12 +55,6 @@ def cmd_status(args, svc: Services) -> int:
 
 def cmd_push(args, svc: Services) -> int:
     info = svc.status.get_status()
-    if info.status == RepoStatus.DIVERGED and not args.force:
-        print_warn(tr(f"分支分叉 (领先 {info.ahead}, 落后 {info.behind})",
-                      f"branches diverged (ahead {info.ahead}, behind {info.behind})"))
-        print_step(tr("运行: githubsync push --force   或   githubsync restore --remote",
-                      "Run: githubsync push --force   or   githubsync restore --remote"))
-        return EXIT_DIVERGED
     if not args.yes:
         if not sys.stdin.isatty():
             print_error(tr("非交互环境需要 --yes 确认",
@@ -74,12 +68,7 @@ def cmd_push(args, svc: Services) -> int:
             return EXIT_OK
     _subscribe_logs(svc, args.quiet)
     try:
-        svc.sync.run(force=args.force)
-    except PushRejectedError as e:
-        print_error(e.message)
-        print_step(tr("运行: githubsync restore --remote   或   githubsync push --force",
-                      "Run: githubsync restore --remote   or   githubsync push --force"))
-        return EXIT_DIVERGED
+        svc.sync.run()
     except SyncError as e:
         print_error(e.message)
         if args.verbose and e.detail:

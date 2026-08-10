@@ -1,7 +1,7 @@
 """SyncService：全量同步编排（初始化 → 暂存 → 提交 → 推送 → Release）。
 
-分叉策略（已批准行为变更）：推送被拒绝时不再自动强推；
-仅 run(force=True) 显式传入才执行强制推送，否则抛 PushRejectedError。
+推送语义（1:1，已批准行为变更）：本地目录是唯一事实来源；
+普通 push 被拒（分叉）时自动强制推送，丢弃远程独有提交，不再抛错。
 """
 from __future__ import annotations
 
@@ -27,16 +27,16 @@ class SyncService:
         self.repo_path = repo_path
         self.release = release
 
-    def run(self, force: bool = False) -> SyncCompleted:
-        """执行完整同步流程。force=True 时推送被拒绝将强制推送。"""
+    def run(self) -> SyncCompleted:
+        """执行完整同步流程。分叉时自动强推（本地 1:1 覆盖远程）。"""
         try:
-            return self._run(force)
+            return self._run()
         except SyncError as e:
             self.bus.publish(SyncFailed(e.message))
             raise
 
     # ── 主流程 ──
-    def _run(self, force: bool) -> SyncCompleted:
+    def _run(self) -> SyncCompleted:
         git = self.git
         git.create_ignore()
         git.ensure_gitignore_entry("changelog.md")
@@ -69,7 +69,7 @@ class SyncService:
         git.branch_to_main()
         self.bus.publish(ActionLog("ACTION", tr("推送到 GitHub",
                                                 "Pushing to GitHub")))
-        self._push_with_recovery(force)
+        self._push_with_recovery()
         self.bus.publish(ActionLog("DONE", tr("推送完成", "Push completed")))
 
         self.release.maybe_publish()
@@ -131,8 +131,8 @@ class SyncService:
         m = detail.lower()
         return "author identity" in m or "user.name" in m
 
-    def _push_with_recovery(self, force: bool) -> None:
-        """推送与失败恢复：建仓引导 / 显式强推；其余错误分类抛出。"""
+    def _push_with_recovery(self) -> None:
+        """推送与失败恢复：建仓引导 / 分叉自动强推；其余错误分类抛出。"""
         branch = self.git.current_branch()
         ok, out = self.git.push(branch, upstream=True)
         if ok:
@@ -152,10 +152,10 @@ class SyncService:
                 return
             raise classify_push_error(out)
         if isinstance(err, PushRejectedError):
-            if not force:
-                raise err  # 不再自动强推
-            self.bus.publish(ActionLog("ACTION", tr("强制推送",
-                                                    "Force pushing")))
+            # 分叉：本地 1:1 覆盖远程，自动强推
+            self.bus.publish(ActionLog("ACTION", tr(
+                "检测到分叉，强制推送（丢弃远程独有提交）",
+                "Diverged; force pushing (discarding remote-only commits)")))
             ok, out = self.git.push(branch, upstream=True, force=True)
             if ok:
                 return

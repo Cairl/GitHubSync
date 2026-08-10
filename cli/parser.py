@@ -71,8 +71,6 @@ def build_parser() -> argparse.ArgumentParser:
     sp = base("push", tr("提交并推送本地变化", "commit and push local changes"))
     sp.add_argument("--yes", "-y", action="store_true",
                     help=tr("跳过确认", "skip confirmation"))
-    sp.add_argument("--force", "-f", action="store_true",
-                    help=tr("分叉时强制推送", "force push when diverged"))
     sp.add_argument("--quiet", "-q", action="store_true",
                     help=tr("只输出错误", "errors only"))
     sp.add_argument("--verbose", action="store_true",
@@ -82,7 +80,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--to", default=None,
                     help=tr("恢复到指定 commit", "restore to commit"))
     sp.add_argument("--remote", action="store_true",
-                    help=tr("本地对齐远程", "align with origin/<branch>"))
+                    help=tr("本地 1:1 复刻远程（丢弃本地差异）",
+                            "replicate remote locally (discard local changes)"))
     sp.add_argument("--yes", "-y", action="store_true",
                     help=tr("跳过确认", "skip confirmation"))
 

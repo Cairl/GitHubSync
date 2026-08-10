@@ -115,6 +115,10 @@ class GitProvider(Protocol):
 
     def restore_to_tag(self, tag: str) -> bool: ...
 
+    def clean_untracked(self) -> bool:
+        """git clean -fd：删除未跟踪文件与目录（被 gitignore 的保留）。"""
+        ...
+
 
 class GitHubProvider(Protocol):
     """gh 子进程能力抽象。"""

@@ -298,6 +298,7 @@ def test_pull_view_align_remote_on_first_item():
     view.run()
     assert svc.git.reset_to == "origin/main"
     assert svc.git.fetch_calls == 1
+    assert svc.git.clean_calls == 1  # 1:1 复刻：对齐远程后清理未跟踪文件
 
 
 def test_pull_view_cursor_matches_menu_style():
@@ -402,6 +403,7 @@ def test_menu_cursor_initial_follows_recommended():
     with pytest.raises(StopIteration):
         app.run()
     assert svc.git.reset_to == "origin/main"  # 拉取视图首项对齐远程
+    assert svc.git.clean_calls == 1
 
 
 def test_menu_cursor_wraps_and_executes_selected():
@@ -417,6 +419,7 @@ def test_menu_cursor_wraps_and_executes_selected():
     with pytest.raises(StopIteration):
         app.run()
     assert svc.git.reset_to == "origin/main"  # 光标最终落在拉取，Enter 对齐远程
+    assert svc.git.clean_calls == 1
 
 
 def test_menu_item_position_stable_across_cursor():

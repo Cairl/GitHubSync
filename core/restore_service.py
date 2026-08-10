@@ -29,7 +29,7 @@ class RestoreService:
         return ok
 
     def restore_remote(self) -> bool:
-        """本地对齐远程：fetch 后 reset --hard origin/<branch>。"""
+        """本地 1:1 复刻远程：fetch 后 reset --hard origin/<branch>，再 clean -fd 清未跟踪文件。"""
         branch = self.git.current_branch()
         self.bus.publish(ActionLog("ACTION", tr(f"对齐远程 origin/{branch}",
                                                 f"Aligning with origin/{branch}")))
@@ -38,11 +38,15 @@ class RestoreService:
                                                   "Failed to fetch remote")))
             return False
         ok = self.git.restore_to_commit(f"origin/{branch}")
-        if ok:
-            self.bus.publish(ActionLog("DONE", tr(f"已对齐 origin/{branch}",
-                                                  f"Aligned with origin/{branch}")))
-            self.bus.publish(RestoreCompleted(f"origin/{branch}"))
-        else:
+        if not ok:
             self.bus.publish(ActionLog("FAIL", tr("对齐远程失败",
                                                   "Failed to align with remote")))
-        return ok
+            return False
+        if not self.git.clean_untracked():
+            self.bus.publish(ActionLog("FAIL", tr("清理未跟踪文件失败",
+                                                  "Failed to clean untracked files")))
+            return False
+        self.bus.publish(ActionLog("DONE", tr(f"已对齐 origin/{branch}",
+                                              f"Aligned with origin/{branch}")))
+        self.bus.publish(RestoreCompleted(f"origin/{branch}"))
+        return True

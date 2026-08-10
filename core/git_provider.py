@@ -222,3 +222,8 @@ class GitCLIProvider:
             return False
         ok, _ = run_command(["git", "reset", "--hard", tag], cwd=self.cwd)
         return ok
+
+    def clean_untracked(self) -> bool:
+        """git clean -fd：删除未跟踪文件与目录（不传 -x，保留被 gitignore 的文件）。"""
+        ok, _ = run_command(["git", "clean", "-fd"], cwd=self.cwd)
+        return ok

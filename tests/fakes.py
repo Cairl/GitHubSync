@@ -26,12 +26,15 @@ class FakeGitProvider:
         self.gitignore_lines: list[str] = ["__pycache__/", "changelog.md"]
         self.fail_mode = "ok"       # ok | repo_not_found | rejected | network
         self.force_push_calls = 0
+        self.force_fail = False     # True 时强推也失败（模拟分支保护）
         self.identity_configured = False
         self.ahead = 0
         self.behind = 0
         self.fetch_ok = True
         self.fetch_calls = 0
         self.reset_to: str | None = None
+        self.clean_ok = True
+        self.clean_calls = 0
 
     # ── GitProvider 协议 ──
     def get_status(self) -> dict:
@@ -120,6 +123,8 @@ class FakeGitProvider:
     def push(self, branch: str, upstream: bool = False, force: bool = False) -> tuple[bool, str]:
         if force:
             self.force_push_calls += 1
+            if self.force_fail:
+                return False, "! [rejected] non-fast-forward"
             return True, ""  # 强制推送总是成功（模拟）
         if self.fail_mode == "repo_not_found":
             self.fail_mode = "ok"  # 首次失败后模拟"仓库已创建"
@@ -167,6 +172,10 @@ class FakeGitProvider:
 
     def restore_to_tag(self, tag: str) -> bool:
         return True
+
+    def clean_untracked(self) -> bool:
+        self.clean_calls += 1
+        return self.clean_ok
 
 
 class FakeGitHubProvider:
