@@ -59,21 +59,37 @@ def _status_detail(info: RepoInfo) -> str:
     return tr(f"状态检测失败: {info.error}", f"Status check failed: {info.error}")
 
 
+def _has_sync(info: RepoInfo, item_id: str) -> bool:
+    """菜单项是否有待处理同步：推送 = 有待推变更，拉取 = 有新提交（分叉两者都有）。"""
+    if item_id == "push":
+        return info.status in (RepoStatus.CHANGED, RepoStatus.AHEAD,
+                               RepoStatus.NO_REPO, RepoStatus.NO_REMOTE,
+                               RepoStatus.DIVERGED)
+    if item_id == "pull":
+        return info.status in (RepoStatus.BEHIND, RepoStatus.DIVERGED)
+    return False
+
+
 def render_menu(info: RepoInfo, active: str | None = None) -> str:
     """菜单行（纯文本 markup，背景由 _menu_block 统一添加）。
 
     导航栏固定三项：推送 / 拉取 / 文件（任何状态下一致），用 ← → 移动光标、
     Enter 执行选中项。active: 当前光标选中的菜单项 id（push/pull/files）。
-    每项固定宽度：前缀 3 格 + 文本 + 后缀 1 格，项间无额外连接符（join 0），
-    间距由「后缀 1 + 前缀 3 = 4 格」构成，任何光标位置下文本位置对齐不跳动。
-    选中项底色覆盖 ` › 文本 `（左右各冗余 1 格，不顶格）；未选中项前后缀均无色。
+    每项固定格式：前缀 1 格 + `[文本]` + 后缀 1 格，选中/未选中文本位置一致，
+    光标移动不跳动；推送/拉取有待处理同步时文本两侧加 `*`（如 `[*推送*]`，
+    同一状态下所有项定宽渲染，布局稳定）。选中项底色覆盖 ` [文本] `（左右
+    各冗余 1 格，不顶格）；未选中项无底色。方括号经 `\[` 转义，星号为字面
+    字符（Rich 15 不解析 `*` 斜体简写，无需转义）。
     """
     parts = []
     for item_id, text in MENU_ITEMS:
+        label = f"*{text}*" if _has_sync(info, item_id) else text
+        # Rich markup 转义：\[ 显示 [；* 为字面字符（Rich 15 不解析 * 斜体简写）
+        bracketed = "\\[" + label + "]"
         if active == item_id:
-            parts.append(f"[bold on {COLOR_MENU_ACTIVE_BG}] › {text} [/]")
+            parts.append(f"[bold on {COLOR_MENU_ACTIVE_BG}] {bracketed} [/]")
         else:
-            parts.append(f"   {text} ")
+            parts.append(f" {bracketed} ")
     return "".join(parts)
 
 
@@ -107,9 +123,9 @@ def _top_line(info: RepoInfo, project_name: str) -> str:
 
 
 def _visible_width(markup: str) -> int:
-    """Rich markup 文本剥离标签后的显示宽度（反斜杠转义方括号还原为 [）。"""
-    text = markup.replace("\\[", "\x00")
-    text = _MARKUP_RE.sub("", text).replace("\x00", "[")
+    """Rich markup 文本剥离标签后的显示宽度（反斜杠转义的 [ * 还原为原字符）。"""
+    text = markup.replace("\\[", "\x00").replace("\\*", "\x00")
+    text = _MARKUP_RE.sub("", text).replace("\x00", " ")
     return get_display_width(text)
 
 

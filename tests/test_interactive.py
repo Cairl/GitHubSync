@@ -22,10 +22,10 @@ def _info(status, **kw):
 
 
 def _strip_markup(s: str) -> str:
-    """剥离 Rich markup 标签（反斜杠转义方括号还原为 [），仅保留可见文本。"""
-    s = s.replace("\\[", "\x00")
+    """剥离 Rich markup 标签（反斜杠转义的 [ * 还原为原字符），仅保留可见文本。"""
+    s = s.replace("\\[", "\x00").replace("\\*", "\x01")
     s = re.sub(r"\[/?[^\]]*\]", "", s)
-    return s.replace("\x00", "[")
+    return s.replace("\x00", "[").replace("\x01", "*")
 
 
 # ── 推荐动作映射 ──
@@ -94,13 +94,29 @@ def test_render_menu_uniform_three_items():
 
 
 def test_render_menu_cursor_marks_active():
-    """选中项背景 ` › 文本 `（左右各冗余 1 格、不顶格），未选中 `   文本 `（前缀3+后缀1）。"""
-    menu = render_menu(_info(RepoStatus.CHANGED, modified=1), active="push")
-    assert "[bold on #636363] › Push [/]" in menu
-    assert "   Pull " in menu and "   Files " in menu
-    menu_right = render_menu(_info(RepoStatus.CHANGED, modified=1), active="files")
-    assert "[bold on #636363] › Files [/]" in menu_right
-    assert "   Push " in menu_right
+    """选中项背景 ` [文本] `（左右各冗余 1 格、不顶格），未选中同格式无底色。"""
+    menu = render_menu(_info(RepoStatus.CLEAN), active="push")
+    assert "[bold on #636363] \\[Push] [/]" in menu
+    assert " \\[Pull] " in menu and " \\[Files] " in menu
+    menu_right = render_menu(_info(RepoStatus.CLEAN), active="files")
+    assert "[bold on #636363] \\[Files] [/]" in menu_right
+    assert " \\[Push] " in menu_right
+
+
+def test_render_menu_sync_marks():
+    """推送/拉取有待处理同步时用 `*` 包裹：CHANGED→[*Push*]，BEHIND→[*Pull*]，DIVERGED 两者都有。"""
+    menu = render_menu(_info(RepoStatus.CHANGED, modified=1))
+    assert "\\[*Push*]" in menu and "\\[Pull]" in menu
+    assert "\\[Files]" in menu
+    menu_behind = render_menu(_info(RepoStatus.BEHIND, behind=1))
+    assert "\\[Push]" in menu_behind and "\\[*Pull*]" in menu_behind
+    menu_div = render_menu(_info(RepoStatus.DIVERGED, ahead=1, behind=1))
+    assert "\\[*Push*]" in menu_div and "\\[*Pull*]" in menu_div
+    menu_clean = render_menu(_info(RepoStatus.CLEAN))
+    assert "\\[Push]" in menu_clean and "\\[Pull]" in menu_clean
+    assert "\\*" not in menu_clean  # 干净状态无任何同步标记
+    # 可见文本（剥 markup）确实显示星号包裹
+    assert "[*Push*]" in _strip_markup(menu) and "[Push]" in _strip_markup(menu_clean)
 
 
 # ── 主循环与视图 ──
@@ -354,7 +370,7 @@ def test_menu_redraw_line_stable_after_remote_configured(tmp_path):
     assert svc.git.remote is not None  # 推送确实配置了 remote
     menu_ys = []
     for ln in out_lines:
-        if "\x1b[2K" in ln and re.search(r"›\s*(Push|Pull)", ln):
+        if "\x1b[2K" in ln and re.search(r"\[(Push|Pull)", ln):
             m = re.search(r"\x1b\[(\d+);1H", ln)
             assert m, ln
             menu_ys.append(int(m.group(1)))
@@ -423,7 +439,7 @@ def test_menu_cursor_wraps_and_executes_selected():
 
 
 def test_menu_item_position_stable_across_cursor():
-    """每项固定宽度（前缀3 + 文本 + 后缀1），join 0：文本位置对齐，光标移动不跳动。"""
+    """每项固定宽度（前缀1 + [文本] + 后缀1），join 0：文本位置对齐，光标移动不跳动。"""
     base = _strip_markup(render_menu(_info(RepoStatus.CLEAN)))
     positions = [base.index(t) for t in ("Push", "Pull", "Files")]
     for active in ("push", "pull", "files"):
@@ -433,12 +449,12 @@ def test_menu_item_position_stable_across_cursor():
 
 
 def test_menu_text_spacing_stable_across_cursor():
-    """join 0，间距 = 后缀1 + 前缀3 = 4 格，任何光标位置下不变。"""
+    """join 0，文本起始列差恒 8（后缀1 + 前缀1 + 框边界），任何光标位置下不变。"""
     for active in ("push", "pull", "files"):
         text = _strip_markup(render_menu(_info(RepoStatus.CLEAN), active=active))
         i_push, i_pull, i_files = (text.index(t) for t in ("Push", "Pull", "Files"))
-        assert i_pull - i_push - 4 == 4, f"active={active}: {text!r}"
-        assert i_files - i_pull - 4 == 4, f"active={active}: {text!r}"
+        assert i_pull - i_push == 8, f"active={active}: {text!r}"
+        assert i_files - i_pull == 8, f"active={active}: {text!r}"
 
 
 # ── 无回显化：文件视图失败标记 ──
