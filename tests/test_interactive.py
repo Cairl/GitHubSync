@@ -527,12 +527,10 @@ def test_pull_view_no_cyan_when_remote_head_absent():
 
 
 # ── 无回显化：推送状态机 ──
-def test_push_marks_progress_then_done(monkeypatch):
+def test_push_marks_progress_then_done():
     """按 Enter 推送：文件标记先 [·] 后 [✓]，且无 ActionLog 回显。"""
     import tui.interactive as ti
-    monkeypatch.setattr(ti.time, "sleep", lambda s: None)
-    svc = make_tui_services(initialized=True, remote="x",
-                            files={"a.py": "1", "b.py": "2"})
+    svc = make_tui_services(initialized=True, remote="x", files={"a.py": "1", "b.py": "2"})
     out_lines = []
     app = InteractiveApp(svc, "fake_repo",
                          key_source=scripted([KEY_ENTER]),
@@ -546,10 +544,9 @@ def test_push_marks_progress_then_done(monkeypatch):
     assert svc.git.commits   # 确实推送了
 
 
-def test_push_failure_marks_error_no_reason(monkeypatch):
+def test_push_failure_marks_error_no_reason():
     """推送失败：所有文件 [✕]，不显示失败原因（完全无回显）。"""
     import tui.interactive as ti
-    monkeypatch.setattr(ti.time, "sleep", lambda s: None)
     svc = make_tui_services(initialized=True, remote="x", files={"a.py": "1"})
     svc.git.fail_mode = "network"  # 持久推送失败 → SyncError
     out_lines = []
@@ -564,10 +561,9 @@ def test_push_failure_marks_error_no_reason(monkeypatch):
     assert "Scanning changes" not in joined  # 无过程回显
 
 
-def test_push_no_changes_no_status_markers(monkeypatch):
+def test_push_no_changes_no_status_markers():
     """无待推文件（如仅初始化仓库）时不显示状态标记，仍正常执行。"""
     import tui.interactive as ti
-    monkeypatch.setattr(ti.time, "sleep", lambda s: None)
     svc = make_tui_services(initialized=False, remote=None)
     out_lines = []
     app = InteractiveApp(svc, "fake_repo",
@@ -580,10 +576,9 @@ def test_push_no_changes_no_status_markers(monkeypatch):
     assert svc.git.initialized  # 仓库已初始化
 
 
-def test_push_ahead_clean_tree_shows_placeholder(monkeypatch):
+def test_push_ahead_clean_tree_shows_placeholder():
     """AHEAD 且工作区干净（变更已提交未推送）：推送视图显示本地提交占位行而非空白。"""
     import tui.interactive as ti
-    monkeypatch.setattr(ti.time, "sleep", lambda s: None)
     # ahead=1 + 无 files → porcelain 为空 → 状态 AHEAD，工作区干净
     svc = make_tui_services(initialized=True, remote="x", ahead=1)
     out_lines = []
@@ -596,3 +591,31 @@ def test_push_ahead_clean_tree_shows_placeholder(monkeypatch):
     assert "[·]" in joined  # 上传中占位标记
     assert "[✓]" in joined  # 完成标记
     assert "1 local commit" in joined  # 占位行表达推送本地提交
+
+
+def test_push_result_persists_until_restart():
+    """推送完成后结果 [✓] 常驻：Backspace 不清除，重启（重开 app）才消失。"""
+    import tui.interactive as ti
+    svc = make_tui_services(initialized=True, remote="x", files={"a.py": "1"})
+    out_lines = []
+    app = InteractiveApp(svc, "fake_repo",
+                         key_source=scripted([KEY_ENTER, KEY_BACKSPACE]),
+                         out=out_lines.append)
+    with pytest.raises(StopIteration):
+        app.run()
+    assert app._push_result is True   # 结果仍锁定
+    assert "[✓]" in app._view         # 结果视图未消失（Backspace 无效）
+
+
+def test_push_result_cleared_on_empty_push():
+    """CLEAN 状态下再次按 Enter（无可推内容）：旧推送结果清除，交还主屏。"""
+    import tui.interactive as ti
+    svc = make_tui_services(initialized=True, remote="x", files={"a.py": "1"})
+    out_lines = []
+    app = InteractiveApp(svc, "fake_repo",
+                         key_source=scripted([KEY_ENTER, KEY_ENTER]),
+                         out=out_lines.append)
+    with pytest.raises(StopIteration):
+        app.run()
+    assert app._push_result is False
+    assert not app._view or "[✓]" not in app._view

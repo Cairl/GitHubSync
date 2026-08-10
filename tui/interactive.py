@@ -12,7 +12,6 @@ Backspace 从子视图返回主屏；退出无专用按键，直接关闭终端�
 from __future__ import annotations
 
 import os
-import time
 import webbrowser
 from typing import Callable
 
@@ -69,10 +68,13 @@ class InteractiveApp:
         self._header_rows: int | None = None  # 顶栏行数（首次绘制后固定）
         self._push_state: dict[str, str] | None = None  # {文件路径: 状态符号}
         self._push_paths: list[str] = []                 # 推送中的文件路径
+        self._push_result = False  # 推送结果视图锁定：常驻显示，重启软件才清除
 
     # ── 渲染 ──
     def _set_view(self, text: str | None) -> None:
         """替换视图块；传 None 表示交还主循环按当前状态重新生成。"""
+        if text is None:
+            self._push_result = False  # 离开视图（进子视图返回）即解除结果锁定
         self._view = text
         self._paint()
 
@@ -214,7 +216,8 @@ class InteractiveApp:
             info = self.svc.status.get_status(fetch=False)
             status_changed = self._info is None or info.status != self._info.status
             self._info = info
-            if self._view is None or status_changed:
+            if self._view is None or (status_changed and not self._push_result):
+                # 推送结果视图锁定期间不因状态变化重绘主屏，结果常驻
                 self._view = self._main_view(info)
             if self._active is None:
                 # 初始光标 = 推荐动作对应项，Enter 默认执行推荐动作
@@ -222,7 +225,7 @@ class InteractiveApp:
             self._paint()
             key = self._key()
             if key == KEY_BACKSPACE:
-                if self._view is not None:
+                if self._view is not None and not self._push_result:
                     self._set_view(None)  # Backspace 返回主屏，视图交还主循环
             elif key == KEY_LEFT:
                 self._move_cursor(-1)
@@ -280,6 +283,12 @@ class InteractiveApp:
             self._push_state = {p: "·" for p in paths}
             self._view = "\n".join(self._render_push_lines())
             self._paint()  # 界面显示全部 [·]（上传中）
+        else:
+            # 无可推内容（工作区干净且无领先提交）：清除旧推送结果，交还主屏
+            self._push_result = False
+            self._push_state = None
+            self._push_paths = []
+            self._set_view(None)
         try:
             self.svc.sync.run()
             if paths:
@@ -290,9 +299,7 @@ class InteractiveApp:
         if paths:
             self._view = "\n".join(self._render_push_lines())
             self._paint()  # 显示 [✓] / [✕]
-            time.sleep(1)  # 停留 1 秒让用户看清结果
-            self._push_state = None
-            self._push_paths = []
+            self._push_result = True  # 结果常驻：重启软件才清除
 
     def _open_remote(self, info: RepoInfo) -> None:
         if info.remote_url:
