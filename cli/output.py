@@ -1,29 +1,21 @@
-"""CLI 输出层：双 Console 分流 + 纯函数渲染。
+"""CLI 输出层：stdout/stderr 分流 + 纯函数渲染。
 
 POSIX 分层契约：
 - 结果数据走 stdout（status_line / diff 行 / info 字段 / --json）
 - 诊断走 stderr（[OK]/[X]/[!]/> 前缀日志、ActionLog、错误消息）
-- 着色由 Rich Console 按 isatty 自动决定，管道/重定向时无 ANSI
+- 着色按 isatty 自动决定，管道/重定向时无 ANSI（见 core/ansi.py）
 """
 from __future__ import annotations
 
 import sys
 from dataclasses import asdict
 
-from rich.console import Console
-
+from core.ansi import RESET, fg_sgr, render_markup, supports_color
 from core.config import (COLOR_BRANCH, COLOR_ERROR, COLOR_GRAY, COLOR_SUCCESS,
-                         COLOR_WARN, STYLE_GRAY, STYLE_GREEN, STYLE_RED,
-                         STYLE_YELLOW)
+                         COLOR_WARN)
 from core.events import ActionLog
 from core.i18n import tr
 from core.status import RepoInfo, RepoStatus
-
-# 不指定 file：Rich 在写入时动态取 sys.stdout/sys.stderr，
-# 使 redirect_stdout/redirect_stderr 与管道检测（isatty）均正确工作。
-stdout_console = Console(highlight=False)
-stderr_console = Console(stderr=True, highlight=False)
-console = stderr_console  # 兼容别名：诊断语义
 
 # 状态语义色：仅成功/警告/错误/次要
 _STATUS_COLOR = {
@@ -76,7 +68,7 @@ def status_line(info: RepoInfo) -> str:
 
 
 def status_markup(info: RepoInfo) -> str:
-    """status_line 的 Rich markup 着色版（剥离标签后文本完全一致）。"""
+    """status_line 的 markup 着色版（剥离标签后文本完全一致，语法见 core/ansi）。"""
     color = _STATUS_COLOR[info.status]
     line = status_line(info)
     if info.status in (RepoStatus.NO_REPO, RepoStatus.ERROR):
@@ -123,21 +115,49 @@ def info_to_dict(info: RepoInfo) -> dict:
     return d
 
 
+# ── 行输出（动态取 sys.stdout/sys.stderr，redirect 与 isatty 检测均正确）──
+def echo(msg: str = "", *, markup: bool = False) -> None:
+    """结果行输出走 stdout；markup=True 时解析着色标签（tty 才上色）。"""
+    stream = sys.stdout
+    if markup:
+        msg = render_markup(msg, supports_color(stream))
+    stream.write(msg + "\n")
+
+
+def err(msg: str = "", *, markup: bool = False) -> None:
+    """诊断行输出走 stderr；markup=True 时解析着色标签（tty 才上色）。"""
+    stream = sys.stderr
+    if markup:
+        msg = render_markup(msg, supports_color(stream))
+    stream.write(msg + "\n")
+
+
+def _err_colored(msg: str, color: str) -> None:
+    """单色诊断行：tty 时整行着 fg 色，否则纯文本。
+
+    消息本体不经标签解析（直接拼 SGR 序列），含方括号的消息安全。
+    """
+    if supports_color(sys.stderr):
+        err(f"{fg_sgr(color)}{msg}{RESET}")
+    else:
+        err(msg)
+
+
 # ── 诊断输出（全部走 stderr）──
 def print_success(msg: str) -> None:
-    stderr_console.print(f"[OK] {msg}", style=STYLE_GREEN, markup=False)
+    _err_colored(f"[OK] {msg}", COLOR_SUCCESS)
 
 
 def print_warn(msg: str) -> None:
-    stderr_console.print(f"[!] {msg}", style=STYLE_YELLOW, markup=False)
+    _err_colored(f"[!] {msg}", COLOR_WARN)
 
 
 def print_error(msg: str) -> None:
-    stderr_console.print(f"[X] {msg}", style=STYLE_RED, markup=False)
+    _err_colored(f"[X] {msg}", COLOR_ERROR)
 
 
 def print_step(msg: str) -> None:
-    stderr_console.print(f"> {msg}", style=STYLE_GRAY, markup=False)
+    _err_colored(f"> {msg}", COLOR_GRAY)
 
 
 def print_action_log(event: ActionLog, quiet: bool = False) -> None:

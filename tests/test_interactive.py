@@ -22,7 +22,7 @@ def _info(status, **kw):
 
 
 def _strip_markup(s: str) -> str:
-    """剥离 Rich markup 标签（反斜杠转义的 [ * 还原为原字符），仅保留可见文本。"""
+    """剥离 markup 标签（反斜杠转义的 [ * 还原为原字符），仅保留可见文本。"""
     s = s.replace("\\[", "\x00").replace("\\*", "\x01")
     s = re.sub(r"\[/?[^\]]*\]", "", s)
     return s.replace("\x00", "[").replace("\x01", "*")
@@ -94,29 +94,34 @@ def test_render_menu_uniform_three_items():
 
 
 def test_render_menu_cursor_marks_active():
-    """选中项背景 ` [文本] `（左右各冗余 1 格、不顶格），未选中同格式无底色。"""
+    """选中项括号可见 + 底色，未选中项括号隐形（与菜单底色同色）：文本位置恒定不抖动。"""
     menu = render_menu(_info(RepoStatus.CLEAN), active="push")
     assert "[bold on #636363] \\[Push] [/]" in menu
-    assert " \\[Pull] " in menu and " \\[Files] " in menu
+    assert "[#292929]\\[[/]Pull" in menu and "[#292929]\\[[/]Files" in menu
     menu_right = render_menu(_info(RepoStatus.CLEAN), active="files")
     assert "[bold on #636363] \\[Files] [/]" in menu_right
-    assert " \\[Push] " in menu_right
+    assert "[#292929]\\[[/]Push" in menu_right
 
 
 def test_render_menu_sync_marks():
-    """推送/拉取有待处理同步时用 `*` 包裹：CHANGED→[*Push*]，BEHIND→[*Pull*]，DIVERGED 两者都有。"""
+    """推送/拉取有待处理同步时用 `*` 包裹：CHANGED→*Push*，BEHIND→*Pull*，DIVERGED 两者都有。"""
     menu = render_menu(_info(RepoStatus.CHANGED, modified=1))
-    assert "\\[*Push*]" in menu and "\\[Pull]" in menu
-    assert "\\[Files]" in menu
+    assert "*Push*" in menu and "Pull" in menu
+    assert "Files" in menu
+    assert "\\[Push]" not in menu  # 无 active 时括号隐形（#292929），无可见 [Push]
     menu_behind = render_menu(_info(RepoStatus.BEHIND, behind=1))
-    assert "\\[Push]" in menu_behind and "\\[*Pull*]" in menu_behind
+    assert "Push" in menu_behind and "*Pull*" in menu_behind
     menu_div = render_menu(_info(RepoStatus.DIVERGED, ahead=1, behind=1))
-    assert "\\[*Push*]" in menu_div and "\\[*Pull*]" in menu_div
+    assert "*Push*" in menu_div and "*Pull*" in menu_div
     menu_clean = render_menu(_info(RepoStatus.CLEAN))
-    assert "\\[Push]" in menu_clean and "\\[Pull]" in menu_clean
-    assert "\\*" not in menu_clean  # 干净状态无任何同步标记
-    # 可见文本（剥 markup）确实显示星号包裹
-    assert "[*Push*]" in _strip_markup(menu) and "[Push]" in _strip_markup(menu_clean)
+    assert "Push" in menu_clean and "Pull" in menu_clean
+    assert "*" not in menu_clean  # 干净状态无任何同步标记
+    # 选中项可见文本（剥 markup）为 [*Push*] / [Push]，未选中隐形括号占位相同
+    sel = _strip_markup(render_menu(_info(RepoStatus.CHANGED, modified=1),
+                                    active="push"))
+    assert "[*Push*]" in sel
+    sel_clean = _strip_markup(render_menu(_info(RepoStatus.CLEAN), active="push"))
+    assert "[Push]" in sel_clean
 
 
 # ── 主循环与视图 ──
@@ -457,42 +462,36 @@ def test_menu_cursor_wraps_and_executes_selected():
     assert svc.git.clean_calls == 1
 
 
-def test_menu_item_position_stable_across_cursor():
-    """每项固定宽度（前缀1 + [文本] + 后缀1），join 0：文本位置对齐，光标移动不跳动。"""
-    base = _strip_markup(render_menu(_info(RepoStatus.CLEAN)))
-    positions = [base.index(t) for t in ("Push", "Pull", "Files")]
-    for active in ("push", "pull", "files"):
-        text = _strip_markup(render_menu(_info(RepoStatus.CLEAN), active=active))
-        got = [text.index(t) for t in ("Push", "Pull", "Files")]
-        assert got == positions, f"active={active}: {text!r}"
+def test_menu_positions_fixed_across_cursor_and_sync():
+    """括号恒占位（未选中隐形）：光标移动（框选切换）不引起任何文本位置变化，零抖动。
 
-
-def test_menu_text_spacing_stable_across_cursor():
-    """join 0，文本起始列差恒 11（文本4 + ] + 后缀4 + 前缀 + [），任何光标位置下不变。"""
-    for active in ("push", "pull", "files"):
-        text = _strip_markup(render_menu(_info(RepoStatus.CLEAN), active=active))
-        i_push, i_pull, i_files = (text.index(t) for t in ("Push", "Pull", "Files"))
-        assert i_pull - i_push == 11, f"active={active}: {text!r}"
-        assert i_files - i_pull == 11, f"active={active}: {text!r}"
-
-
-def test_menu_equal_width_with_and_without_star():
-    """无同步项预留 `*` 宽度（后缀 4 = 有同步后缀 2）：每项总宽等宽，* 增减不影响其他项位置。"""
-    texts = []
+    剥掉颜色标签后，同一状态下任意光标位置的菜单行逐字符相同；
+    `*` 同步标记只影响自身项（Push 右移 1 列），其他项位置恒定。
+    """
     for st, kw in [(RepoStatus.CLEAN, {}),
                    (RepoStatus.CHANGED, {"modified": 1}),
                    (RepoStatus.DIVERGED, {"ahead": 1, "behind": 1})]:
-        t = _strip_markup(render_menu(_info(st, **kw)))
-        texts.append(t)
-        # 三项各自的 [ 起始列恒定（1 / 12 / 23），等宽核心
-        assert [i for i, ch in enumerate(t) if ch == "["] == [1, 12, 23], t
-    # 有/无同步状态下 Files 位置完全一致
-    assert texts[0].index("Files") == texts[1].index("Files") == texts[2].index("Files")
-    # 光标移动同样不破坏等宽
+        base = _strip_markup(render_menu(_info(st, **kw)))  # active=None
+        for active in ("push", "pull", "files"):
+            t = _strip_markup(render_menu(_info(st, **kw), active=active))
+            assert t == base, f"{st.name} active={active}: {t!r}"
+    clean = _strip_markup(render_menu(_info(RepoStatus.CLEAN)))
+    changed = _strip_markup(render_menu(_info(RepoStatus.CHANGED, modified=1)))
+    diverged = _strip_markup(render_menu(_info(RepoStatus.DIVERGED, ahead=1, behind=1)))
+    assert changed.index("Files") == clean.index("Files") == diverged.index("Files")
+    assert changed.index("Push") == clean.index("Push") + 1  # * 前缀占 1 列
+    assert changed.index("Pull") == clean.index("Pull")  # CHANGED 的 Pull 无 *
+    assert diverged.index("Push") == clean.index("Push") + 1
+    assert diverged.index("Pull") == clean.index("Pull") + 1  # DIVERGED 的 Pull 也有 *
+
+
+def test_menu_text_spacing_stable_across_cursor():
+    """间隙恒 12（项宽 = 前缀1 + 框2 + 文本4 + pad5），任何状态与光标下不变。"""
     for active in ("push", "pull", "files"):
-        t = _strip_markup(render_menu(_info(RepoStatus.CHANGED, modified=1),
-                                      active=active))
-        assert [i for i, ch in enumerate(t) if ch == "["] == [1, 12, 23], t
+        text = _strip_markup(render_menu(_info(RepoStatus.CLEAN), active=active))
+        i_push, i_pull, i_files = (text.index(t) for t in ("Push", "Pull", "Files"))
+        assert i_pull - i_push == 12, f"active={active}: {text!r}"
+        assert i_files - i_pull == 12, f"active={active}: {text!r}"
 
 
 # ── 无回显化：文件视图失败标记 ──
@@ -542,7 +541,7 @@ def test_files_view_shows_failed_marker_after_push_fail(tmp_path):
 def test_pull_view_marks_remote_head_cyan():
     """本地与远程一致的提交 hash 用青色标注，其余不变色。
 
-    颜色验证走 _render_label 纯函数（测试环境无 tty，Rich 不产 ANSI 色码）；
+    颜色验证走 _render_label 纯函数（测试环境无 tty，不产 ANSI 色码）；
     集成断言 run() 正确记录远程一致版本且两行均渲染。
     """
     from tui.restore_view import RestoreView as RV

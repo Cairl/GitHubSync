@@ -47,11 +47,6 @@ def main(argv: list[str] | None = None) -> int:
     if sys.platform != "win32":
         print("GitHubSync only supports Windows. / 此工具仅支持 Windows 平台。")
         return 3
-    try:
-        import rich  # noqa: F401
-    except ImportError:
-        print("Missing dependency / 请先安装依赖: pip install -r requirements.txt")
-        return 3
 
     from cli.commands import COMMANDS
     from cli.exit_codes import EXIT_FAILED

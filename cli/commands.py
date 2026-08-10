@@ -15,9 +15,9 @@ from core.services import Services
 from core.status import RepoStatus
 
 from .exit_codes import EXIT_CHANGES, EXIT_DIVERGED, EXIT_FAILED, EXIT_OK
-from .output import (format_diff, info_to_dict, print_action_log,
+from .output import (echo, err, format_diff, info_to_dict, print_action_log,
                      print_error, print_step, print_success, print_warn,
-                     status_markup, stderr_console, stdout_console)
+                     status_markup)
 
 # 状态 → 退出码（NO_REPO / NO_REMOTE / ERROR 不在表中 → EXIT_FAILED）
 _STATUS_EXIT = {
@@ -46,10 +46,10 @@ def cmd_status(args, svc: Services) -> int:
     if args.json:
         print(json.dumps(info_to_dict(info), ensure_ascii=False))
     else:
-        stdout_console.print(status_markup(info))
+        echo(status_markup(info), markup=True)
         if args.verbose and info.change_count:
             for line in format_diff(svc.git.get_porcelain()):
-                stdout_console.print(line, markup=False)
+                echo(line)
     return _STATUS_EXIT.get(info.status, EXIT_FAILED)
 
 
@@ -64,7 +64,7 @@ def cmd_push(args, svc: Services) -> int:
         answer = _prompt(tr(f"推送 {info.change_count} 处变化到 {target}? [y/N] ",
                             f"Push {info.change_count} changes to {target}? [y/N] "))
         if answer.strip().lower() != "y":
-            stderr_console.print(tr("已取消。", "Cancelled."))
+            err(tr("已取消。", "Cancelled."))
             return EXIT_OK
     _subscribe_logs(svc, args.quiet)
     try:
@@ -72,7 +72,7 @@ def cmd_push(args, svc: Services) -> int:
     except SyncError as e:
         print_error(e.message)
         if args.verbose and e.detail:
-            stderr_console.print(e.detail)
+            err(e.detail)
         return EXIT_FAILED
     return EXIT_OK
 
@@ -99,18 +99,18 @@ def cmd_restore(args, svc: Services) -> int:
                        "non-interactive environment requires --to <hash>"))
         return EXIT_FAILED
     for i, c in enumerate(commits, 1):
-        stderr_console.print(f"{i:>2}. {c['hash'][:8]}  {c['time']}")
+        err(f"{i:>2}. {c['hash'][:8]}  {c['time']}")
     answer = _prompt(tr("恢复到 [编号, q 退出]: ",
                         "Restore to [number, q to quit]: "))
     if not answer.isdigit() or not (1 <= int(answer) <= len(commits)):
-        stderr_console.print(tr("已取消。", "Cancelled."))
+        err(tr("已取消。", "Cancelled."))
         return EXIT_OK
     target = commits[int(answer) - 1]["hash"]
     if not args.yes:
         confirm = _prompt(tr(f"硬重置到 {target[:8]}? [y/N] ",
                              f"Reset --hard to {target[:8]}? [y/N] "))
         if confirm.strip().lower() != "y":
-            stderr_console.print(tr("已取消。", "Cancelled."))
+            err(tr("已取消。", "Cancelled."))
             return EXIT_OK
     ok = svc.restore.restore(target)
     return EXIT_OK if ok else EXIT_FAILED
@@ -119,10 +119,10 @@ def cmd_restore(args, svc: Services) -> int:
 def cmd_diff(args, svc: Services) -> int:
     lines = format_diff(svc.git.get_porcelain())
     if not lines:
-        stderr_console.print(tr("工作区干净。", "Working tree clean."))
+        err(tr("工作区干净。", "Working tree clean."))
         return EXIT_OK
     for line in lines:
-        stdout_console.print(line, markup=False)
+        echo(line)
     return EXIT_CHANGES
 
 
@@ -139,19 +139,16 @@ def cmd_info(args, svc: Services) -> int:
             "recent_commits": commits,
         }, ensure_ascii=False))
         return EXIT_OK
-    stdout_console.print(tr("路径: ", "Path:    ") + info.path, markup=False)
-    stdout_console.print(tr("分支: ", "Branch:  ") + info.branch, markup=False)
-    stdout_console.print(
-        tr("远程: ", "Remote:  ")
-        + (info.remote_url or tr("未配置", "not configured")), markup=False)
-    stdout_console.print(
-        tr("发布: ", "Release: ")
-        + (release["tag"] if release else tr("无", "none")), markup=False)
+    echo(tr("路径: ", "Path:    ") + info.path)
+    echo(tr("分支: ", "Branch:  ") + info.branch)
+    echo(tr("远程: ", "Remote:  ")
+         + (info.remote_url or tr("未配置", "not configured")))
+    echo(tr("发布: ", "Release: ")
+         + (release["tag"] if release else tr("无", "none")))
     if commits:
-        stdout_console.print(tr("提交:", "Commits:"))
+        echo(tr("提交:", "Commits:"))
         for c in commits:
-            stdout_console.print(f"  {c['hash'][:8]}  {c['time']}",
-                                 markup=False)
+            echo(f"  {c['hash'][:8]}  {c['time']}")
     return EXIT_OK
 
 

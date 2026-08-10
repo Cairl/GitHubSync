@@ -12,26 +12,22 @@
 
 from __future__ import annotations
 
+import sys
 from typing import Callable
 
-from rich.console import Console
+from core.ansi import render_markup, supports_color
 
 _CLEAR_LINE = "\x1b[2K"   # 清除光标所在整行
 _LINE_DOWN = "\x1b[1B"    # 光标下移一行
 _LINE_UP = "\x1b[{n}A"    # 光标上移 n 行
 
-# 交互界面统一走 stderr（诊断语义），与 CLI 日志一致。
-# highlight=False：禁用 Rich 默认语法高亮，保持纯文字克制风格。
-# width=200：本 Console 仅做 markup→ANSI 文本转换，不承担终端折行；
-# 过窄默认宽（80）会对长分隔线等插入换行，破坏块结构。
-_markup_console = Console(stderr=True, highlight=False, width=200)
-
 
 def markup_to_ansi(text: str) -> str:
-    """Rich markup → ANSI 字符串（按 isatty 自动着色，管道/重定向时无颜色）。"""
-    with _markup_console.capture() as capture:
-        _markup_console.print(text, end="")
-    return capture.get()
+    """markup → ANSI 字符串（stderr 为 tty 时着色，管道/重定向时纯文本）。
+
+    语法与着色判定见 core/ansi.py；不做终端折行（宽度由调用方自行控制）。
+    """
+    return render_markup(text, supports_color(sys.stderr))
 
 
 class DiffRenderer:

@@ -23,9 +23,9 @@ from .renderer import DiffRenderer, markup_to_ansi
 
 
 def _escape_markup(name: str) -> str:
-    """文件名转义，防止选中行背景 markup 内被 Rich 误解析。
+    """文件名转义，防止选中行背景 markup 内被误解析为标签。
 
-    只转义反斜杠与左方括号：`\\` 是 Rich 的反斜杠转义符，`[` 是标签
+    只转义反斜杠与左方括号：`\\` 是 markup 的反斜杠转义符，`[` 是标签
     开始符；孤立的 `]` 不构成标签，无需转义（转义反而会残留反斜杠）。
     """
     return name.replace("\\", "\\\\").replace("[", "\\[")
@@ -67,7 +67,7 @@ def _render_row(item: dict, selected: bool, name_col: int, btn_w: int,
     raw_name = _truncate(item["name"], name_col)
     name = _escape_markup(raw_name)
     if item["ignored"]:
-        # Rich 带样式 tag 用 [/] 关闭（关闭最近未闭合 tag，选中行内嵌套安全）
+        # 带样式 tag 用 [/] 关闭（关闭最近未闭合 tag，选中行内嵌套安全）
         name = f"[strike]{name}[/]"
     pad = name_col - get_display_width(raw_name)
     raw_btn = push_text if item["ignored"] else ignore_text

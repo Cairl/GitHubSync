@@ -174,7 +174,7 @@ class InteractiveApp:
         """文件级变化列表，状态用符号标记（[+]/[~]/[-]）显示，符号按语义着色。
 
         符号单独经 markup 着色，文件名保持纯文本（防止仓库文件名中的方括号
-        被 Rich markup 误解析）。
+        被 markup 误解析）。
         """
         from cli.output import format_diff
         lines = []
@@ -200,7 +200,7 @@ class InteractiveApp:
         """推送状态行：按 _push_paths + _push_state 渲染（不依赖 porcelain 实时状态）。
 
         符号带方括号（[·]/[✓]/[✕]），与 diff 列表 [~]/[+]/[-] 风格一致；
-        方括号经反斜杠转义，防 Rich markup 误解析。
+        方括号经反斜杠转义，防 markup 误解析。
         """
         lines = []
         for path in self._push_paths:

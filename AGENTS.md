@@ -12,7 +12,7 @@ GitHubSync 是一个 Windows 终端同步工具，将本地目录同步到 GitHu
 - **版本**: 3.0.0（定义于 `main.py`）
 - **平台**: Windows only（交互模式依赖 `msvcrt`；CLI 子命令不依赖）
 - **外部依赖**: `git` CLI、`gh` CLI（GitHub 官方命令行工具）
-- **Python 依赖**: `rich>=13.0`（通过 requirements.txt 管理）
+- **Python 依赖**: 无第三方依赖（纯标准库；markup→ANSI 着色由 `core/ansi.py` 自研实现）
 
 ## 架构（CLI/TUI 双薄表现层 + core 业务层）
 
@@ -22,7 +22,8 @@ pyproject.toml           # 打包：console_scripts githubsync = main:main
 github_sync.bat          # Windows 启动器：Set-Location 到脚本目录后 python -m main
 │
 ├── core/                # 业务层：Provider 协议 + 用例服务（不碰 UI / 不碰 argparse）
-│   ├── config.py        # 语义色、Rich Style、键盘扫描码（KEY_*）
+│   ├── config.py        # 语义色、键盘扫描码（KEY_*）
+│   ├── ansi.py          # markup→ANSI 自研解析（[#hex]/[on #hex]/[bold]/[strike]、嵌套、isatty 判定）
 │   ├── i18n.py          # tr() 中英双语（按系统语言 / GITHUBSYNC_LANG 覆盖）
 │   ├── events.py        # DomainEventBus + ActionLog 事件（业务→表现层解耦）
 │   ├── exceptions.py    # SyncError 异常体系 + classify_push_error()
@@ -71,9 +72,6 @@ github_sync.bat          # Windows 启动器：Set-Location 到脚本目录后 p
 ## Setup Commands
 
 ```bash
-# 安装依赖
-pip install -r requirements.txt
-
 # 安装 gh CLI（GitHub 官方工具）
 winget install --id GitHub.cli
 
@@ -134,7 +132,7 @@ python -m main
 | `o` | 在浏览器中打开远程仓库（隐藏快捷键，不进菜单） |
 | `Backspace` / `Esc` | 从子视图返回主屏 |
 
-- 导航栏固定三项：`[推送]` `[拉取]` `[文件]`（`[ ]` 框选标记光标，任何状态下一致，分叉时不再切换为恢复/强制推送）；推送 / 拉取有新的同步时文本两侧加 `*`（如 `[*推送*]`，由 `_has_sync()` 判定：CHANGED/AHEAD/NO_REPO/NO_REMOTE/DIVERGED 标记推送，BEHIND/DIVERGED 标记拉取）
+- 导航栏固定三项：`推送` `拉取` `文件`（未选中括号隐形与菜单底色 #292929 同色、视觉为裸文本，选中项括号可见如 `[推送]` + `#636363` 底色框选；括号恒占位，文本位置/项宽/空隙不随框选抖动，任何状态下一致，分叉时不再切换为恢复/强制推送）；推送 / 拉取有新的同步时文本两侧加 `*`（如 `*推送*`，选中时 `[*推送*]`，由 `_has_sync()` 判定：CHANGED/AHEAD/NO_REPO/NO_REMOTE/DIVERGED 标记推送，BEHIND/DIVERGED 标记拉取）
 - 拉取视图（`restore_view.py`）：本地最近 20 条提交列表（最新在前），光标默认首个——Enter 对齐远程（fetch + reset --hard origin/分支 + clean -fd，本地 1:1 复刻远程，丢弃本地已提交独有内容与未跟踪文件）；其余提交 Enter 恢复到该历史版本（无二次确认）；无提交时提示并返回
 - 菜单渲染见 `tui/screen.py`：`MENU_ITEMS` 定义项序（即 ← → 移动顺序），`menu_for_action()` 把推荐动作映射为初始光标落点（diff/refresh 无菜单项，落推送）
 - 操作执行后有 1 秒冷却期，防止误触
@@ -151,7 +149,7 @@ python -m main
 
 ### 格式约定
 - 中文注释和文档字符串
-- 颜色使用 `core/config.py` 中的颜色常量 / Rich `Style` 对象，禁止硬编码 ANSI 转义序列
+- 颜色使用 `core/config.py` 中的颜色常量（markup 标签如 `[#3FB950]`，由 `core/ansi.py` 转 ANSI），禁止硬编码 ANSI 转义序列
 - 模块间使用相对导入（`from ..domain.events import ...` 仅旧版；当前用 `from core.xxx import ...`）
 - 分层边界：core 不 import cli/tui；cli/tui 只依赖 core 服务与协议
 
@@ -172,7 +170,6 @@ python -m main
 ## Troubleshooting
 
 - **`python` 命令找不到**：使用 `py` 代替，或在 PATH 中添加 Python 安装路径
-- **`rich` 模块找不到**：运行 `pip install -r requirements.txt`
 - **`gh` 命令找不到**：运行 `winget install --id GitHub.cli`
 - **推送失败（认证错误）**：运行 `gh auth login` 重新登录
 - **推送失败（仓库不存在）**：SyncService 自动打开浏览器创建仓库并重推

@@ -1,4 +1,4 @@
-"""交互模式渲染：纯函数，RepoInfo → Rich markup 文本。零 I/O、零子进程。
+"""交互模式渲染：纯函数，RepoInfo → markup 文本（语法见 core/ansi.py）。零 I/O、零子进程。
 
 顶栏布局：项目/分支·状态/主页 / 空行 / 菜单块（#292929 背景三行）/ 空行。
 """
@@ -75,25 +75,30 @@ def render_menu(info: RepoInfo, active: str | None = None) -> str:
 
     导航栏固定三项：推送 / 拉取 / 文件（任何状态下一致），用 ← → 移动光标、
     Enter 执行选中项。active: 当前光标选中的菜单项 id（push/pull/files）。
-    每项固定格式：前缀 1 格 + `[文本]` + 后缀，选中/未选中文本位置一致，
-    光标移动不跳动；推送/拉取有待处理同步时文本两侧加 `*`（如 `[*推送*]`），
-    无同步项后缀 4 格、有同步项后缀 2 格——两种状态下每项等宽，
-    `*` 增减不影响后续项位置（`[推送]` + 4 = `[*推送*]` + 2）。
-    选中项底色覆盖 ` [文本] `（左右各冗余 1 格，不顶格）；未选中项无底色。
-    方括号经反斜杠转义，星号为字面字符（Rich 15 不解析 `*` 斜体简写，无需转义）。
+    括号恒占位（每项固定 [文本] 布局），未选中时括号隐形（与菜单底色同色），
+    选中时括号可见 + 底色 #636363——文本位置 / 项宽 / 空隙在所有状态与
+    光标位置下恒定，框选不引起抖动。推送/拉取有待处理同步时文本两侧加 `*`
+    （如 `[*推送*]`），pad 只补偿 `*` 的宽度（选中与否 pad 相同）。
+    选中项底色覆盖 ` [文本] `（左右各冗余 1 格，不顶格）。
+    方括号经反斜杠转义，星号为字面字符（markup 语法无 `*` 斜体简写，无需转义）。
     """
     parts = []
     for item_id, text in MENU_ITEMS:
         synced = _has_sync(info, item_id)
-        label = f"*{text}*" if synced else text
-        # Rich markup 转义：\[ 显示 [；* 为字面字符（Rich 15 不解析 * 斜体简写）
-        bracketed = "\\[" + label + "]"
-        # 无同步后缀 4 格预留 `*` 宽度，与有同步（后缀 2）等宽
-        pad = 2 if synced else 4
-        if active == item_id:
+        selected = active == item_id
+        star = "*" if synced else ""
+        # pad 只补偿 * 宽度（5 - 2*有同步），与是否选中无关 → 等宽且框选不抖
+        pad = 5 - (2 if synced else 0)
+        if selected:
+            # 可见括号 + 底色框选
+            bracketed = "\\[" + star + text + star + "]"
             parts.append(f"[bold on {COLOR_MENU_ACTIVE_BG}] {bracketed} [/]"
                          f"{' ' * (pad - 1)}")
         else:
+            # 括号隐形（与菜单底色同色），占位固定，不推挤文本
+            # ] 为字面字符无需转义（解析器只认 [ 开头标签）
+            bracketed = (f"[{COLOR_MENU_BG}]\\[[/]{star}{text}{star}"
+                         f"[{COLOR_MENU_BG}]][/]")
             parts.append(f" {bracketed}{' ' * pad}")
     return "".join(parts)
 
@@ -128,7 +133,7 @@ def _top_line(info: RepoInfo, project_name: str) -> str:
 
 
 def _visible_width(markup: str) -> int:
-    """Rich markup 文本剥离标签后的显示宽度（反斜杠转义的 [ * 还原为原字符）。"""
+    """markup 文本剥离标签后的显示宽度（反斜杠转义的 [ * 还原为原字符）。"""
     text = markup.replace("\\[", "\x00").replace("\\*", "\x00")
     text = _MARKUP_RE.sub("", text).replace("\x00", " ")
     return get_display_width(text)

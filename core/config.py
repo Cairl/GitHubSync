@@ -1,11 +1,9 @@
-"""全局常量：语义色（GitHub Primer 配色）、Rich Style、键盘扫描码。
+"""全局常量：语义色（GitHub Primer 配色）、键盘扫描码。
 
 颜色只用于三态语义：成功（绿）、警告（黄）、错误（红），外加次要（灰）
 与分支名（蓝）。禁止在代码中硬编码其他颜色。
 """
 from __future__ import annotations
-
-from rich.style import Style
 
 # ─── 语义色 ───────
 COLOR_SUCCESS = "#3FB950"   # 成功 / 已同步
@@ -21,16 +19,6 @@ COLOR_MENU_ACTIVE_BG = "#636363"  # 菜单光标选中项底色框选
 COLOR_BRANCH = "#58A6FF"    # 分支名（CLI status 用）
 COLOR_BRANCH_NAME = "#CDD6F4"  # 分支名（TUI 顶栏，Catppuccin Mocha 白）
 COLOR_CYAN = "#39C5CF"    # 青：本地与远程一致的版本（拉取视图标注）
-
-# ─── Rich Style ───────
-STYLE_BOLD = Style(bold=True)
-STYLE_DIM = Style(dim=True)
-STYLE_GREEN = Style(color=COLOR_SUCCESS)
-STYLE_YELLOW = Style(color=COLOR_WARN)
-STYLE_RED = Style(color=COLOR_ERROR)
-STYLE_GRAY = Style(color=COLOR_GRAY)
-STYLE_BLUE = Style(color=COLOR_BRANCH)
-STYLE_DEFAULT = Style()
 
 # ─── 键盘扫描码（msvcrt 单键，仅交互模式使用）───────
 KEY_UP = b"H"
