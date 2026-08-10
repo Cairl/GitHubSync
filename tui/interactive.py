@@ -15,9 +15,9 @@ import os
 import webbrowser
 from typing import Callable
 
-from core.config import (COLOR_ERROR, COLOR_GRAY, COLOR_SUCCESS, COLOR_WARN,
-                         KEY_BACKSPACE, KEY_ENTER, KEY_LEFT, KEY_O,
-                         KEY_RIGHT)
+from core.config import (COLOR_ERROR, COLOR_GRAY, COLOR_SUCCESS,
+                         COLOR_SUCCESS_DIM, COLOR_WARN, KEY_BACKSPACE,
+                         KEY_ENTER, KEY_LEFT, KEY_O, KEY_RIGHT)
 from core.exceptions import SyncError
 from core.i18n import tr
 from core.services import Services
@@ -36,8 +36,8 @@ _MAX_LOG_LINES = 20
 _CHANGE_CN = {"A": "[+]", "M": "[~]", "D": "[-]"}
 # 符号语义色：新增=成功绿 / 修改=警告黄 / 删除=错误红
 _CHANGE_COLOR = {"A": COLOR_SUCCESS, "M": COLOR_WARN, "D": COLOR_ERROR}
-# 推送状态符号 → 语义色：上传中=次要灰 / 完成=成功绿 / 失败=错误红
-_PUSH_COLOR = {"·": COLOR_GRAY, "✓": COLOR_SUCCESS, "✕": COLOR_ERROR}
+# 推送状态符号 → 语义色：上传中=次要灰 / 完成=成功降档绿 / 失败=错误红
+_PUSH_COLOR = {"·": COLOR_GRAY, "✓": COLOR_SUCCESS_DIM, "✕": COLOR_ERROR}
 
 
 class InteractiveApp:

@@ -9,6 +9,7 @@ from rich.style import Style
 
 # ─── 语义色 ───────
 COLOR_SUCCESS = "#3FB950"   # 成功 / 已同步
+COLOR_SUCCESS_DIM = "#2EA043"  # 成功降档：推送结果 [✓] 标记（比 COLOR_SUCCESS 暗一档，避免刺眼）
 COLOR_WARN = "#F6E2B7"      # 警告 / 有变化（浅米黄）
 COLOR_ERROR = "#F85149"     # 错误 / 分叉
 COLOR_GRAY = "#8B949E"      # 次要信息
