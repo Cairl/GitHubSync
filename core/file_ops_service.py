@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 
-from .events import ActionLog, DomainEventBus
+from .events import DomainEventBus
 from .gitignore_parser import GitignoreMatcher
 from .i18n import tr
 from .protocols import GitProvider
@@ -52,36 +52,26 @@ class FileOpsService:
             })
         return items
 
-    def push_file(self, filename: str) -> None:
-        """把被忽略的文件重新纳入同步：移出 gitignore → 暂存 → 提交 → 推送。"""
-        self.bus.publish(ActionLog("ACTION", tr(f"推送 {filename}",
-                                                f"Pushing {filename}")))
+    def push_file(self, filename: str) -> bool:
+        """把被忽略的文件重新纳入同步：移出 gitignore → 暂存 → 提交 → 推送。成功返回 True。"""
         self.git.remove_from_gitignore_file(filename)
         self.git.stage_paths(filename)
         ok, detail = self.git.commit(tr(f"添加 {filename}", f"Add {filename}"))
         if not ok and detail:
-            self.bus.publish(ActionLog("FAIL", detail))
-            return
-        self._push()
+            return False
+        return self._push()
 
-    def remove_file(self, filename: str) -> None:
-        """把文件排除出同步：加入 gitignore → 移除跟踪 → 提交 → 推送。"""
-        self.bus.publish(ActionLog("ACTION", tr(f"排除 {filename}",
-                                                f"Excluding {filename}")))
+    def remove_file(self, filename: str) -> bool:
+        """把文件排除出同步：加入 gitignore → 移除跟踪 → 提交 → 推送。成功返回 True。"""
         self.git.add_to_gitignore_file(filename)
         self.git.exclude_from_index(filename)
-        ok, detail = self.git.commit(tr(f"排除 {filename}",
-                                        f"Exclude {filename}"))
+        ok, detail = self.git.commit(tr(f"排除 {filename}", f"Exclude {filename}"))
         if not ok and detail:
-            self.bus.publish(ActionLog("FAIL", detail))
-            return
-        self._push()
+            return False
+        return self._push()
 
-    def _push(self) -> None:
+    def _push(self) -> bool:
+        """推送当前分支，返回是否成功。"""
         branch = self.git.current_branch()
-        ok, out = self.git.push(branch, upstream=True)
-        if ok:
-            self.bus.publish(ActionLog("DONE", tr("已推送到 GitHub",
-                                                  "Pushed to GitHub")))
-        else:
-            self.bus.publish(ActionLog("FAIL", out))
+        ok, _ = self.git.push(branch, upstream=True)
+        return ok

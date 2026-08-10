@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from typing import Callable
 
-from core.config import (COLOR_BRANCH, COLOR_MENU_ACTIVE_BG, KEY_BACKSPACE,
-                         KEY_DOWN, KEY_ENTER, KEY_ESC, KEY_UP)
+from core.config import (COLOR_BRANCH, COLOR_ERROR, COLOR_MENU_ACTIVE_BG,
+                         KEY_BACKSPACE, KEY_DOWN, KEY_ENTER, KEY_ESC, KEY_UP)
 from core.file_ops_service import FileOpsService
 from core.i18n import tr
 from core.utils import get_display_width, get_key
@@ -53,10 +53,13 @@ def _truncate(name: str, width: int) -> str:
 
 
 def _render_row(item: dict, selected: bool, name_col: int, btn_w: int,
-                push_text: str, ignore_text: str) -> str:
-    """单行 markup：文件名（已忽略加删除线）+ 独立按钮列（垂直对齐）。
+                push_text: str, ignore_text: str,
+                failed: bool = False) -> str:
+    """单行 markup：行首状态位 + 文件名（已忽略加删除线）+ 独立按钮列。
 
     selected: 选中行加 › 光标与 #636363 底色框选（同导航栏）。
+    failed: 行首显示红色 [!]（3 宽，替换 3 空格前缀 / ` › ` 光标前缀，
+    文件名字段起始列保持 3 不跳动；选中失败行隐藏 › 但保留底色框选）。
     删除线只包文件名本体，padding 与按钮不受影响，列对齐不跳动；
     文件名与按钮之间固定 2 空格分隔；「推送」按钮蓝色（#58A6FF），
     提示其触发同步动作。
@@ -71,11 +74,12 @@ def _render_row(item: dict, selected: bool, name_col: int, btn_w: int,
     btn_pad = btn_w - get_display_width(raw_btn)
     btn = f"[{COLOR_BRANCH}]{raw_btn}[/]" if item["ignored"] else raw_btn
     gap = f"{' ' * pad}  "  # 文件名字段补齐 + 固定 2 空格分隔
+    head = f"[{COLOR_ERROR}]\\[!][/]" if failed else (" › " if selected else "   ")
     if selected:
         # 与导航栏光标同款：› 箭头 + #636363 底色框选（左右各冗余 1 格）
         return (f"[bold on {COLOR_MENU_ACTIVE_BG}]"
-                f" › {name}{gap}{btn}{' ' * btn_pad} [/]")
-    return f"   {name}{gap}{btn}{' ' * btn_pad} "
+                f"{head}{name}{gap}{btn}{' ' * btn_pad} [/]")
+    return f"{head}{name}{gap}{btn}{' ' * btn_pad} "
 
 
 class FilesView:
@@ -89,6 +93,7 @@ class FilesView:
         self._key = key_source
         self._out = out
         self._render_body = render_body
+        self._failed: set[str] = set()  # 操作失败的文件名集合（行首 [!]）
 
     def run(self) -> None:
         block = DiffRenderer(self._out) if self._render_body is None else None
@@ -117,7 +122,8 @@ class FilesView:
                                for i in items), _NAME_COL_MAX)
             for i, item in enumerate(items):
                 markup = _render_row(item, i == index, name_col, btn_w,
-                                     push_text, ignore_text)
+                                     push_text, ignore_text,
+                                     failed=item["name"] in self._failed)
                 lines.append(markup_to_ansi(markup))
             text = "\n".join(lines)
             if self._render_body is not None:
@@ -142,7 +148,11 @@ class FilesView:
                     block.clear()
                 item = items[index]
                 if item["ignored"]:
-                    self.file_ops.push_file(item["name"])
+                    ok = self.file_ops.push_file(item["name"])
                 else:
-                    self.file_ops.remove_file(item["name"])
+                    ok = self.file_ops.remove_file(item["name"])
+                if ok:
+                    self._failed.discard(item["name"])
+                else:
+                    self._failed.add(item["name"])
                 dirty = True  # 列表已变化，下一轮重新扫描

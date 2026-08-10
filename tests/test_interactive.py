@@ -439,3 +439,46 @@ def test_menu_text_spacing_stable_across_cursor():
         i_push, i_pull, i_files = (text.index(t) for t in ("Push", "Pull", "Files"))
         assert i_pull - i_push - 4 == 4, f"active={active}: {text!r}"
         assert i_files - i_pull - 4 == 4, f"active={active}: {text!r}"
+
+
+# ── 无回显化：文件视图失败标记 ──
+def test_file_ops_push_file_returns_bool():
+    """push_file 返回 bool：推送失败 False，成功 True。"""
+    svc = make_tui_services(initialized=True, remote="x")
+    svc.git.fail_mode = "network"  # 持久推送失败
+    assert svc.file_ops.push_file("a.py") is False
+    svc.git.fail_mode = "ok"
+    assert svc.file_ops.push_file("b.py") is True
+
+
+def test_files_view_failed_marker_aligned():
+    """失败行行首 [!] 红色；[!] 3 宽与正常行 3 空格等宽，文件名起始列一致。"""
+    from tui.files_view import _render_row
+    from tui.renderer import markup_to_ansi
+    failed = _render_row({"name": "notes.txt", "ignored": True},
+                         selected=False, name_col=20, btn_w=6,
+                         push_text="Push", ignore_text="Ignore", failed=True)
+    ok = _render_row({"name": "a.py", "ignored": False},
+                     selected=False, name_col=20, btn_w=6,
+                     push_text="Push", ignore_text="Ignore")
+    assert "\\[!]" in failed            # [!] 转义后为字面文本
+    assert "#F85149" in failed          # 错误红
+    assert "\\[!]" not in ok
+    # 对齐：转换后的可见文本中 [!] 3 宽与 3 空格等宽，文件名起始列一致
+    f, o = markup_to_ansi(failed), markup_to_ansi(ok)
+    assert f.index("notes.txt") == o.index("a.py") == 3
+
+
+def test_files_view_shows_failed_marker_after_push_fail(tmp_path):
+    """push 失败后文件行出现 [!] 标记。"""
+    (tmp_path / "notes.txt").write_text("x")
+    svc = make_tui_services(initialized=True, remote="x")
+    svc.git.gitignore_lines = ["notes.txt"]
+    svc.git.fail_mode = "network"      # 推送失败
+    svc.file_ops.repo_path = str(tmp_path)
+    out_lines = []
+    view = FilesView(svc.file_ops, key_source=scripted([KEY_ENTER, KEY_BACKSPACE]),
+                     out=out_lines.append)
+    view.run()
+    joined = "\n".join(out_lines)
+    assert "[!]" in joined              # 失败标记出现
