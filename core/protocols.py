@@ -109,6 +109,10 @@ class GitProvider(Protocol):
         """[{"hash": str, "time": str}]，新的在前。"""
         ...
 
+    def remote_head(self, branch: str) -> str | None:
+        """远程跟踪引用 origin/<branch> 指向的 commit hash；无远程/失败返回 None。"""
+        ...
+
     def restore_to_commit(self, commit_hash: str) -> bool:
         """git reset --hard <hash>（支持 origin/<branch>）。"""
         ...

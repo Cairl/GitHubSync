@@ -210,6 +210,11 @@ class GitCLIProvider:
             commits.append({"hash": h, "time": t[:19]})
         return commits
 
+    def remote_head(self, branch: str) -> str | None:
+        ok, out = run_command(["git", "rev-parse", f"origin/{branch}"],
+                              cwd=self.cwd)
+        return out.strip() if ok and out.strip() else None
+
     def restore_to_commit(self, commit_hash: str) -> bool:
         ok, _ = run_command(["git", "reset", "--hard", commit_hash],
                             cwd=self.cwd)

@@ -35,6 +35,7 @@ class FakeGitProvider:
         self.reset_to: str | None = None
         self.clean_ok = True
         self.clean_calls = 0
+        self.remote_head_hash: str | None = None
 
     # ── GitProvider 协议 ──
     def get_status(self) -> dict:
@@ -156,6 +157,9 @@ class FakeGitProvider:
         if self.remote is None:
             return None
         return self.ahead, self.behind
+
+    def remote_head(self, branch: str) -> str | None:
+        return self.remote_head_hash
 
     def remote_url(self) -> str | None:
         return self.remote

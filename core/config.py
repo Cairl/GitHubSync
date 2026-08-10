@@ -18,6 +18,7 @@ COLOR_MENU_BG = "#292929"   # 菜单行背景
 COLOR_MENU_ACTIVE_BG = "#636363"  # 菜单光标选中项底色框选
 COLOR_BRANCH = "#58A6FF"    # 分支名（CLI status 用）
 COLOR_BRANCH_NAME = "#CDD6F4"  # 分支名（TUI 顶栏，Catppuccin Mocha 白）
+COLOR_CYAN = "#39C5CF"    # 青：本地与远程一致的版本（拉取视图标注）
 
 # ─── Rich Style ───────
 STYLE_BOLD = Style(bold=True)

@@ -142,3 +142,12 @@ def test_fake_git_restore_to_origin_branch():
     g = FakeGitProvider()
     assert g.restore_to_commit("origin/main") is True
     assert g.reset_to == "origin/main"
+
+
+def test_fake_git_remote_head():
+    """FakeGitProvider.remote_head 返回可配置值；未配置返回 None。"""
+    from tests.fakes import FakeGitProvider
+    g = FakeGitProvider()
+    assert g.remote_head("main") is None
+    g.remote_head_hash = "fedcba9876543210"
+    assert g.remote_head("main") == "fedcba9876543210"
