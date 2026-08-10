@@ -619,3 +619,16 @@ def test_push_result_cleared_on_empty_push():
         app.run()
     assert app._push_result is False
     assert not app._view or "[✓]" not in app._view
+
+
+def test_begin_push_renders_dot_before_fetch():
+    """[·] 在按下 Enter 后立即渲染：_begin_push 路径零 fetch，无网络等待。"""
+    svc = make_tui_services(initialized=True, remote="x", files={"a.py": "1"})
+    out_lines = []
+    app = InteractiveApp(svc, "fake_repo", key_source=scripted([]),
+                         out=out_lines.append)
+    app._info = svc.status.get_status(fetch=False)
+    app._begin_push()
+    assert svc.git.fetch_calls == 0          # [·] 渲染路径不触发 fetch
+    assert app._push_state == {"a.py": "·"}  # 全部标记上传中
+    assert "[·]" in app._view                # 视图立即显示

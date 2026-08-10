@@ -15,9 +15,9 @@ import os
 import webbrowser
 from typing import Callable
 
-from core.config import (COLOR_ERROR, COLOR_GRAY, COLOR_SUCCESS,
-                         COLOR_SUCCESS_DIM, COLOR_WARN, KEY_BACKSPACE,
-                         KEY_ENTER, KEY_LEFT, KEY_O, KEY_RIGHT)
+from core.config import (COLOR_ERROR, COLOR_GRAY, COLOR_SUCCESS_SOFT,
+                         COLOR_WARN, KEY_BACKSPACE, KEY_ENTER, KEY_LEFT,
+                         KEY_O, KEY_RIGHT)
 from core.exceptions import SyncError
 from core.i18n import tr
 from core.services import Services
@@ -34,10 +34,10 @@ _CLEAR_SCREEN = "\x1b[2J\x1b[H"
 _MAX_LOG_LINES = 20
 # 单字母状态 → 符号标记（TUI 显示用；CLI format_diff 保持字母契约不变）
 _CHANGE_CN = {"A": "[+]", "M": "[~]", "D": "[-]"}
-# 符号语义色：新增=成功绿 / 修改=警告黄 / 删除=错误红
-_CHANGE_COLOR = {"A": COLOR_SUCCESS, "M": COLOR_WARN, "D": COLOR_ERROR}
-# 推送状态符号 → 语义色：上传中=次要灰 / 完成=成功降档绿 / 失败=错误红
-_PUSH_COLOR = {"·": COLOR_GRAY, "✓": COLOR_SUCCESS_DIM, "✕": COLOR_ERROR}
+# 符号语义色：新增=柔和浅绿 / 修改=警告黄 / 删除=错误红
+_CHANGE_COLOR = {"A": COLOR_SUCCESS_SOFT, "M": COLOR_WARN, "D": COLOR_ERROR}
+# 推送状态符号 → 语义色：上传中=次要灰 / 完成=柔和浅绿 / 失败=错误红
+_PUSH_COLOR = {"·": COLOR_GRAY, "✓": COLOR_SUCCESS_SOFT, "✕": COLOR_ERROR}
 
 
 class InteractiveApp:
@@ -75,6 +75,8 @@ class InteractiveApp:
         """替换视图块；传 None 表示交还主循环按当前状态重新生成。"""
         if text is None:
             self._push_result = False  # 离开视图（进子视图返回）即解除结果锁定
+            self._push_state = None    # 丢弃推送上下文，旧标记不再复用
+            self._push_paths = []
         self._view = text
         self._paint()
 
@@ -232,11 +234,15 @@ class InteractiveApp:
             elif key == KEY_RIGHT:
                 self._move_cursor(1)
             elif key == KEY_ENTER:
-                # 动作前 fetch 刷新远程状态（分叉/落后检测可靠），频率低可接受
+                # 推送动作先立即渲染 [·]（Enter 一瞬间反馈），再做 fetch 与同步
+                if self._active == "push":
+                    self._begin_push()
+                # fetch 刷新远程状态（分叉/落后检测可靠），频率低可接受
                 info = self.svc.status.get_status(fetch=True)
                 status_changed = info.status != self._info.status
                 self._info = info
-                if status_changed:
+                if status_changed and self._push_state is None:
+                    # 推送进行中（[·] 已渲染）或结果锁定时不覆盖推送视图
                     self._view = self._main_view(info)
                 self._paint()
                 self._act_menu(self._active, info)
@@ -269,7 +275,12 @@ class InteractiveApp:
             FilesView(self.svc.file_ops, self._key, self._out,
                       render_body=self._set_view).run()
 
-    def _push(self) -> None:
+    def _begin_push(self) -> None:
+        """推送前立即渲染 [·] 视图：Enter 一瞬间反馈，不等 fetch 网络等待。
+
+        计算待推文件并显示全部 [·]；无可推内容（工作区干净且无领先提交）
+        时清除旧推送结果，交还主屏。
+        """
         from cli.output import format_diff
         paths = [line[3:] for line in format_diff(self.svc.git.get_porcelain())
                  if len(line) >= 3 and line[1] == " "]
@@ -284,11 +295,15 @@ class InteractiveApp:
             self._view = "\n".join(self._render_push_lines())
             self._paint()  # 界面显示全部 [·]（上传中）
         else:
-            # 无可推内容（工作区干净且无领先提交）：清除旧推送结果，交还主屏
+            # 无可推内容：清除旧推送结果，交还主屏
             self._push_result = False
             self._push_state = None
             self._push_paths = []
             self._set_view(None)
+
+    def _push(self) -> None:
+        """执行推送同步；[·] 视图已由 _begin_push 预先渲染（Enter 一瞬间显示）。"""
+        paths = self._push_paths
         try:
             self.svc.sync.run()
             if paths:
