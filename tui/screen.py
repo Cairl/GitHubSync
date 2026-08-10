@@ -33,14 +33,11 @@ def _status_detail(info: RepoInfo) -> str:
         # 顶栏仅显示变化文件总数，具体文件由内容区变更列表展示
         return f"+{info.change_count}" if info.change_count else ""
     if info.status == RepoStatus.AHEAD:
-        return tr(f"领先远程 {info.ahead} 个提交",
-                  f"{info.ahead} commit(s) to push")
+        return tr("尚未提交完成", "not fully synced")
     if info.status == RepoStatus.BEHIND:
-        return tr(f"远程有 {info.behind} 个新提交",
-                  f"{info.behind} commit(s) to pull")
+        return tr("有新的提交", "new commits to pull")
     if info.status == RepoStatus.DIVERGED:
-        return tr(f"分叉: {info.ahead} 个提交待推送, {info.behind} 个待拉取",
-                  f"diverged: {info.ahead} commit(s) to push, {info.behind} to pull")
+        return tr("有新的提交和拉取", "new commits to push and pull")
     if info.status == RepoStatus.CLEAN:
         return tr("已同步，工作区干净。", "Synced, working tree clean.")
     if info.status == RepoStatus.NO_REPO:

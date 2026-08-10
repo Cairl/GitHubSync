@@ -176,7 +176,7 @@ class InteractiveApp:
                 color = _CHANGE_COLOR.get(line[0])
                 if color:
                     label = markup_to_ansi(f"[{color}]{label}[/]")
-                lines.append(f"{label}  {line[3:]}")
+                lines.append(f"{label} {line[3:]}")
             else:
                 lines.append(line)
         return lines
