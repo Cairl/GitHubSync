@@ -60,7 +60,7 @@ github_sync.bat          # Windows 启动器：Set-Location 到脚本目录后 p
 - **接口定义在 core/protocols.py，实现在 core/git_provider.py / github_provider.py**（依赖倒置，可替换实现）；
 - UI 永不触碰 git/gh 命令（tui/ 与 cli/ 中无 subprocess 调用，全部走 core 服务）；
 - 渲染路径零子进程：`tui/screen.py` 纯函数只读 RepoInfo；
-- 事件驱动：core 服务发布事件（DomainEventBus），表现层订阅刷新。
+- 事件驱动：core 服务发布事件（DomainEventBus），表现层订阅刷新；交互模式取消订阅 ActionLog（同步操作无回显，结果由视图状态标记/颜色表达），CLI 仍按 stdout/stderr 契约输出。
 
 ### 扩展性约定
 
@@ -105,7 +105,7 @@ github_sync.bat
 # 语法检查（项目根目录执行）
 python -c "import py_compile, glob; [py_compile.compile(f, doraise=True) for f in glob.glob('main.py') + glob.glob('cli/**/*.py', recursive=True) + glob.glob('core/**/*.py', recursive=True) + glob.glob('tui/**/*.py', recursive=True)]"
 
-# 运行全部测试（80 个用例，FakeProvider 无需真实 git/gh）
+# 运行全部测试（102 个用例，FakeProvider 无需真实 git/gh）
 python -m pytest tests/ -v
 
 # 运行交互模式（同步当前工作目录）
@@ -162,6 +162,12 @@ python -m main
 - 输出行数受可用高度限制（`_content_rows`），超屏截断保留末尾，防止终端滚动顶掉顶栏
 - 行首统一缩进 2 空格；文件名/列表超宽 `_truncate()` 截断
 - **禁止在渲染路径中执行子进程调用**（`build_screen`/`render_*` 只读缓存）
+
+### 无回显化（同步操作结果由视图状态表达）
+- 推送：`InteractiveApp._push` 状态机——按 Enter 后 `_push_state` 接管视图，所有待推文件标记 `[·]`（灰，上传中）→ 成功 `[✓]`（绿）/ 失败 `[✕]`（红），停留 1 秒后交还主循环；git 仍为一次 commit + push
+- 拉取：`RestoreView` 通过 `GitProvider.remote_head()` 取远程跟踪引用，本地与远程一致的提交 hash 标青色 `COLOR_CYAN`（#39C5CF），其余不变色
+- 文件视图：`FileOpsService.push_file/remove_file` 返回 bool，失败文件行首 `[!]`（红），按钮状态切换即成功指示
+- 失败原因完全无回显：`[✕]`/`[!]` 即全部反馈（排查用 CLI `status`）
 
 ## Troubleshooting
 
