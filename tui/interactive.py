@@ -62,7 +62,7 @@ class InteractiveApp:
         self._logs: list[str] = []      # 日志块
         self._header_shown = False      # 顶栏是否已绘制（只绘制一次）
         self._active: str | None = None  # 光标选中的菜单项 id（push/pull/files）
-        self._last_active: str | None = None  # 上次渲染的选中项（菜单高亮去重）
+        self._last_menu_markup = ""  # 上次菜单行源 markup（去重：光标移动或同步标记增减）
         self._status_ansi = ""          # 当前状态行的 ANSI 文本（定点更新比对）
         self._last_content = ""         # 上次内容区文本（去重）
         self._header_rows: int | None = None  # 顶栏行数（首次绘制后固定）
@@ -144,7 +144,8 @@ class InteractiveApp:
                               self._active))
             self._out(_CLEAR_SCREEN + header)
             self._header_shown = True
-            self._last_active = self._active
+            self._last_menu_markup = render_menu_line(
+                self._info, self._active, self._terminal_width())
             self._status_ansi = markup_to_ansi(f"  {render_status_line(self._info)}")
             self._render_content(content)
             return
@@ -153,15 +154,20 @@ class InteractiveApp:
             # 定点重写顶栏第二行（print 自带换行，光标落点不影响后续绝对定位）
             self._out(f"\x1b[2;1H\x1b[2K{status}")
             self._status_ansi = status
-        if self._active != self._last_active:
-            self._last_active = self._active
-            self._redraw_menu()
+        self._redraw_menu()  # 菜单变化（光标移动 / 同步标记 * 增减）才实际输出
         self._render_content(content)
 
     def _redraw_menu(self) -> None:
-        """选中项变化时定点重绘菜单行（行号 = 顶栏行数 - 2）。"""
+        """菜单行定点重绘（行号 = 顶栏行数 - 2）；源 markup 未变（如无效键）则零输出。
+
+        用源 markup（含样式标签）而非 ANSI 比对：非 tty 下 ANSI 无颜色码，
+        选中/未选中差异会丢失，导致光标移动被误判为无变化。
+        """
         y = self._header_lines() - 2
         line = render_menu_line(self._info, self._active, self._terminal_width())
+        if line == self._last_menu_markup:
+            return
+        self._last_menu_markup = line
         self._out(f"\x1b[{y};1H\x1b[2K{markup_to_ansi(line)}")
 
     def _diff_lines(self) -> list[str]:

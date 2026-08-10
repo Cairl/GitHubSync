@@ -348,6 +348,25 @@ def test_pull_view_no_commits_shows_hint():
     assert "No commits." in "\n".join(out_lines)
 
 
+def test_menu_sync_star_clears_after_push():
+    """推送完成后状态变 CLEAN，菜单 `*` 同步标记消失（状态变化触发菜单重绘）。"""
+    svc = make_tui_services(initialized=True, remote="x", files={"a.py": "1"})
+    out_lines = []
+    app = InteractiveApp(svc, "fake_repo",
+                         key_source=scripted([KEY_ENTER]),
+                         out=out_lines.append)
+    with pytest.raises(StopIteration):
+        app.run()
+    assert svc.git.commits  # 确实推送了
+    joined = "\n".join(out_lines)
+    assert "[*Push*]" in joined  # 推送前菜单带 * 标记（CHANGED）
+    menu_redraws = [ln for ln in out_lines
+                    if "\x1b[2K" in ln and "[Push]" in ln]
+    assert menu_redraws, "推送后应发生菜单重绘"
+    assert "[*Push*]" not in menu_redraws[-1], \
+        f"推送完成后 * 应消失: {menu_redraws[-1]!r}"
+
+
 def test_menu_redraw_line_stable_after_remote_configured(tmp_path):
     """remote 从无到有后菜单重绘行号不漂移（顶栏布局固定），避免重行。
 
