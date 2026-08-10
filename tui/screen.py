@@ -6,8 +6,8 @@ from __future__ import annotations
 
 import re
 
-from core.config import (COLOR_BRANCH_NAME, COLOR_LABEL, COLOR_MENU_BG,
-                         COLOR_URL)
+from core.config import (COLOR_BRANCH_NAME, COLOR_LABEL, COLOR_MENU_ACTIVE_BG,
+                         COLOR_MENU_BG, COLOR_URL)
 from core.i18n import tr
 from core.status import RepoInfo, RepoStatus
 from core.utils import get_display_width
@@ -63,16 +63,18 @@ def render_menu(info: RepoInfo, active: str | None = None) -> str:
     """菜单行（纯文本 markup，背景由 _menu_block 统一添加）。
 
     导航栏固定三项：推送 / 拉取 / 文件（任何状态下一致），用 ← → 移动光标、
-    Enter 执行选中项。active: 当前光标选中的菜单项 id（push/pull/files）；
-    命中项前缀 `› ` 且加粗，未命中项用两空格占位对齐（宽度一致，光标移动不跳动）。
+    Enter 执行选中项。active: 当前光标选中的菜单项 id（push/pull/files）。
+    每项固定宽度：前缀 3 格 + 文本 + 后缀 1 格，项间无额外连接符（join 0），
+    间距由「后缀 1 + 前缀 3 = 4 格」构成，任何光标位置下文本位置对齐不跳动。
+    选中项底色覆盖 ` › 文本 `（左右各冗余 1 格，不顶格）；未选中项前后缀均无色。
     """
     parts = []
     for item_id, text in MENU_ITEMS:
         if active == item_id:
-            parts.append(f"[bold]› {text}[/]")
+            parts.append(f"[bold on {COLOR_MENU_ACTIVE_BG}] › {text} [/]")
         else:
-            parts.append(f"  {text}")
-    return "  ".join(parts)
+            parts.append(f"   {text} ")
+    return "".join(parts)
 
 
 def _strip_git_suffix(url: str) -> str:

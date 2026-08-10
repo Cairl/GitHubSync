@@ -15,6 +15,7 @@ COLOR_GRAY = "#8B949E"      # 次要信息
 COLOR_URL = "#F6E2B7"       # 主页地址（米黄）
 COLOR_LABEL = "#666666"     # 标签（项目/分支/主页 冒号左边）
 COLOR_MENU_BG = "#292929"   # 菜单行背景
+COLOR_MENU_ACTIVE_BG = "#636363"  # 菜单光标选中项底色框选
 COLOR_BRANCH = "#58A6FF"    # 分支名（CLI status 用）
 COLOR_BRANCH_NAME = "#CDD6F4"  # 分支名（TUI 顶栏，Catppuccin Mocha 白）
 
