@@ -8,12 +8,22 @@ from __future__ import annotations
 
 from typing import Callable
 
-from core.config import KEY_BACKSPACE, KEY_DOWN, KEY_ENTER, KEY_ESC, KEY_UP
+from core.config import (COLOR_MENU_ACTIVE_BG, KEY_BACKSPACE, KEY_DOWN,
+                         KEY_ENTER, KEY_ESC, KEY_UP)
 from core.file_ops_service import FileOpsService
 from core.i18n import tr
 from core.utils import get_key
 
-from .renderer import DiffRenderer
+from .renderer import DiffRenderer, markup_to_ansi
+
+
+def _escape_markup(name: str) -> str:
+    """文件名转义，防止选中行背景 markup 内被 Rich 误解析。
+
+    只转义反斜杠与左方括号：`\\` 是 Rich 的反斜杠转义符，`[` 是标签
+    开始符；孤立的 `]` 不构成标签，无需转义（转义反而会残留反斜杠）。
+    """
+    return name.replace("\\", "\\\\").replace("[", "\\[")
 
 
 class FilesView:
@@ -45,12 +55,16 @@ class FilesView:
                     return
                 index = max(0, min(index, len(items) - 1))
                 dirty = False
-            lines = ["", tr("文件  (↑↓ 移动, Enter 切换, Backspace 返回)",
-                            "Files  (↑↓ move, Enter toggle, Backspace back)")]
+            lines: list[str] = []
             for i, item in enumerate(items):
-                cursor = ">" if i == index else " "
                 tag = tr(" [已忽略]", " [ignored]") if item["ignored"] else ""
-                lines.append(f"{cursor} {item['name']}{tag}")
+                if i == index:
+                    # 与导航栏光标同款：› 箭头 + #636363 底色框选（左右各冗余 1 格）
+                    markup = (f"[bold on {COLOR_MENU_ACTIVE_BG}]"
+                              f" › {_escape_markup(item['name'])}{tag} [/]")
+                    lines.append(markup_to_ansi(markup))
+                else:
+                    lines.append(f"   {item['name']}{tag} ")
             text = "\n".join(lines)
             if self._render_body is not None:
                 self._render_body(text)

@@ -247,7 +247,11 @@ class InteractiveApp:
         if item_id == "push":
             self._push()
         elif item_id == "pull":
-            self.svc.restore.restore_remote()
+            # 拉取 = 选择历史 git：首项对齐远程，其余历史提交可恢复
+            from .restore_view import RestoreView
+            RestoreView(self.svc.restore, self.svc.git, self._key, self._out,
+                        render_body=self._set_view,
+                        max_rows=self._content_rows()).run()
         elif item_id == "files":
             from .files_view import FilesView
             FilesView(self.svc.file_ops, self._key, self._out,

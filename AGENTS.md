@@ -48,7 +48,7 @@ github_sync.bat          # Windows 启动器：Set-Location 到脚本目录后 p
 │   ├── screen.py        # render_header / render_menu / render_status_line 纯函数
 │   ├── interactive.py   # InteractiveApp：顶栏常驻 + 内容区刷新的主循环
 │   ├── files_view.py    # 文件视图：↑↓ 移动，Enter 切换推送/忽略
-│   ├── restore_view.py  # 恢复视图：↑↓ 移动，Enter 选择 + y 确认（已无导航入口，保留组件与直接测试）
+│   ├── restore_view.py  # 拉取视图：本地历史提交，首个 Enter 对齐远程，其余恢复
 │   └── renderer.py      # DiffRenderer / markup_to_ansi
 │
 └── tests/               # pytest（fakes.py 内存版 Provider，无需真实 git/gh）
@@ -129,12 +129,13 @@ python -m main
 | 按键 | 功能 |
 |---|---|
 | `←` `→` | 移动菜单光标（推送 / 拉取 / 文件，循环移动），`›` 标记当前选中项 |
-| `Enter` | 执行光标选中的菜单项（推送 / 对齐远程 / 文件视图），初始光标停在推荐动作上 |
-| `↑` `↓` | 子视图内移动选中项（文件） |
+| `Enter` | 执行光标选中的菜单项（推送 / 拉取 / 文件视图），初始光标停在推荐动作上 |
+| `↑` `↓` | 子视图内移动选中项（文件 / 拉取历史列表） |
 | `o` | 在浏览器中打开远程仓库（隐藏快捷键，不进菜单） |
 | `Backspace` / `Esc` | 从子视图返回主屏 |
 
 - 导航栏固定三项：`› 推送` `拉取` `文件`（`›` 标记光标，任何状态下一致，分叉时不再切换为恢复/强制推送）
+- 拉取视图（`restore_view.py`）：本地最近 20 条提交列表（最新在前），光标默认首个——Enter 对齐远程（fetch + reset --hard origin/分支）；其余提交 Enter 恢复到该历史版本（无二次确认）；无提交时提示并返回
 - 菜单渲染见 `tui/screen.py`：`MENU_ITEMS` 定义项序（即 ← → 移动顺序），`menu_for_action()` 把推荐动作映射为初始光标落点（diff/refresh 无菜单项，落推送）
 - 操作执行后有 1 秒冷却期，防止误触
 - 退出无专用按键：直接关闭终端窗口即可（Ctrl+C 兜底）
