@@ -10,6 +10,7 @@ from rich.style import Style
 # ─── 语义色 ───────
 COLOR_SUCCESS = "#3FB950"   # 成功 / 已同步
 COLOR_SUCCESS_SOFT = "#ABDFA7"  # 柔和浅绿：推送结果 [✓] 与新增 [+]
+COLOR_PUSH_PENDING = "#636363"  # 上传中 [·] 标记（比 COLOR_GRAY 更暗）
 COLOR_WARN = "#F6E2B7"      # 警告 / 有变化（浅米黄）
 COLOR_ERROR = "#F85149"     # 错误 / 分叉
 COLOR_GRAY = "#8B949E"      # 次要信息
