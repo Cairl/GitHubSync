@@ -468,12 +468,31 @@ def test_menu_item_position_stable_across_cursor():
 
 
 def test_menu_text_spacing_stable_across_cursor():
-    """join 0，文本起始列差恒 8（后缀1 + 前缀1 + 框边界），任何光标位置下不变。"""
+    """join 0，文本起始列差恒 11（文本4 + ] + 后缀4 + 前缀 + [），任何光标位置下不变。"""
     for active in ("push", "pull", "files"):
         text = _strip_markup(render_menu(_info(RepoStatus.CLEAN), active=active))
         i_push, i_pull, i_files = (text.index(t) for t in ("Push", "Pull", "Files"))
-        assert i_pull - i_push == 8, f"active={active}: {text!r}"
-        assert i_files - i_pull == 8, f"active={active}: {text!r}"
+        assert i_pull - i_push == 11, f"active={active}: {text!r}"
+        assert i_files - i_pull == 11, f"active={active}: {text!r}"
+
+
+def test_menu_equal_width_with_and_without_star():
+    """无同步项预留 `*` 宽度（后缀 4 = 有同步后缀 2）：每项总宽等宽，* 增减不影响其他项位置。"""
+    texts = []
+    for st, kw in [(RepoStatus.CLEAN, {}),
+                   (RepoStatus.CHANGED, {"modified": 1}),
+                   (RepoStatus.DIVERGED, {"ahead": 1, "behind": 1})]:
+        t = _strip_markup(render_menu(_info(st, **kw)))
+        texts.append(t)
+        # 三项各自的 [ 起始列恒定（1 / 12 / 23），等宽核心
+        assert [i for i, ch in enumerate(t) if ch == "["] == [1, 12, 23], t
+    # 有/无同步状态下 Files 位置完全一致
+    assert texts[0].index("Files") == texts[1].index("Files") == texts[2].index("Files")
+    # 光标移动同样不破坏等宽
+    for active in ("push", "pull", "files"):
+        t = _strip_markup(render_menu(_info(RepoStatus.CHANGED, modified=1),
+                                      active=active))
+        assert [i for i, ch in enumerate(t) if ch == "["] == [1, 12, 23], t
 
 
 # ── 无回显化：文件视图失败标记 ──

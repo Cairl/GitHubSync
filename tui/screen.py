@@ -75,21 +75,26 @@ def render_menu(info: RepoInfo, active: str | None = None) -> str:
 
     导航栏固定三项：推送 / 拉取 / 文件（任何状态下一致），用 ← → 移动光标、
     Enter 执行选中项。active: 当前光标选中的菜单项 id（push/pull/files）。
-    每项固定格式：前缀 1 格 + `[文本]` + 后缀 1 格，选中/未选中文本位置一致，
-    光标移动不跳动；推送/拉取有待处理同步时文本两侧加 `*`（如 `[*推送*]`，
-    同一状态下所有项定宽渲染，布局稳定）。选中项底色覆盖 ` [文本] `（左右
-    各冗余 1 格，不顶格）；未选中项无底色。方括号经反斜杠转义，星号为字面
-    字符（Rich 15 不解析 `*` 斜体简写，无需转义）。
+    每项固定格式：前缀 1 格 + `[文本]` + 后缀，选中/未选中文本位置一致，
+    光标移动不跳动；推送/拉取有待处理同步时文本两侧加 `*`（如 `[*推送*]`），
+    无同步项后缀 4 格、有同步项后缀 2 格——两种状态下每项等宽，
+    `*` 增减不影响后续项位置（`[推送]` + 4 = `[*推送*]` + 2）。
+    选中项底色覆盖 ` [文本] `（左右各冗余 1 格，不顶格）；未选中项无底色。
+    方括号经反斜杠转义，星号为字面字符（Rich 15 不解析 `*` 斜体简写，无需转义）。
     """
     parts = []
     for item_id, text in MENU_ITEMS:
-        label = f"*{text}*" if _has_sync(info, item_id) else text
+        synced = _has_sync(info, item_id)
+        label = f"*{text}*" if synced else text
         # Rich markup 转义：\[ 显示 [；* 为字面字符（Rich 15 不解析 * 斜体简写）
         bracketed = "\\[" + label + "]"
+        # 无同步后缀 4 格预留 `*` 宽度，与有同步（后缀 2）等宽
+        pad = 2 if synced else 4
         if active == item_id:
-            parts.append(f"[bold on {COLOR_MENU_ACTIVE_BG}] {bracketed} [/]")
+            parts.append(f"[bold on {COLOR_MENU_ACTIVE_BG}] {bracketed} [/]"
+                         f"{' ' * (pad - 1)}")
         else:
-            parts.append(f" {bracketed} ")
+            parts.append(f" {bracketed}{' ' * pad}")
     return "".join(parts)
 
 
