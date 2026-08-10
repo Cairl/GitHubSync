@@ -48,7 +48,7 @@ github_sync.bat          # Windows 启动器：Set-Location 到脚本目录后 p
 │   ├── screen.py        # render_header / render_menu / render_status_line 纯函数
 │   ├── interactive.py   # InteractiveApp：顶栏常驻 + 内容区刷新的主循环
 │   ├── files_view.py    # 文件视图：↑↓ 移动，Enter 切换推送/忽略
-│   ├── restore_view.py  # 恢复视图：↑↓ 移动，Enter 选择 + y 确认
+│   ├── restore_view.py  # 恢复视图：↑↓ 移动，Enter 选择 + y 确认（已无导航入口，保留组件与直接测试）
 │   └── renderer.py      # DiffRenderer / markup_to_ansi
 │
 └── tests/               # pytest（fakes.py 内存版 Provider，无需真实 git/gh）
@@ -120,7 +120,7 @@ python -m main
 - `test_sync_service.py`：同步流程、失败恢复（仓库不存在/非快进/网络错误）、事件发布；
 - `test_release_service.py`：版本号计算纯逻辑（YYwWWa 递增/跨周重置）、发布流程；
 - `test_infrastructure.py`：gitignore 解析、命令超时、重试装饰器；
-- `test_interactive.py`：渲染纯函数、推荐动作映射、主循环与视图交互（Enter 执行、Backspace 返回）；
+- `test_interactive.py`：渲染纯函数、推荐动作映射、菜单光标（← → + Enter）、主循环与视图交互（Enter 执行选中项、Backspace 返回）；
 - `test_renderer.py`：markup→ANSI 转换；
 - 手动验证：`python -m main` 观察同步行为（交互模式无退出键，直接关闭窗口）。
 
@@ -128,15 +128,17 @@ python -m main
 
 | 按键 | 功能 |
 |---|---|
-| `Enter` | 执行状态推断的推荐动作（推送 / 对齐远程 / 查看差异），菜单不标注键位 |
-| `d` `f` `r` `i` | 进入详情 / 文件 / 恢复 / 信息视图 |
-| `o` | 在浏览器中打开远程仓库 |
+| `←` `→` | 移动菜单光标（推送 / 拉取 / 文件，循环移动），`›` 标记当前选中项 |
+| `Enter` | 执行光标选中的菜单项（推送 / 对齐远程 / 文件视图），初始光标停在推荐动作上 |
+| `↑` `↓` | 子视图内移动选中项（文件） |
+| `o` | 在浏览器中打开远程仓库（隐藏快捷键，不进菜单） |
 | `Backspace` / `Esc` | 从子视图返回主屏 |
-| `↑` `↓` | 子视图内移动选中项（文件 / 版本） |
 
+- 导航栏固定三项：`› 推送` `拉取` `文件`（`›` 标记光标，任何状态下一致，分叉时不再切换为恢复/强制推送）
+- 菜单渲染见 `tui/screen.py`：`MENU_ITEMS` 定义项序（即 ← → 移动顺序），`menu_for_action()` 把推荐动作映射为初始光标落点（diff/refresh 无菜单项，落推送）
 - 操作执行后有 1 秒冷却期，防止误触
 - 退出无专用按键：直接关闭终端窗口即可（Ctrl+C 兜底）
-- Enter 是全局默认执行键，菜单只列出带快捷键的操作项
+- Enter 执行光标选中项，菜单不标注键位
 
 ## Code Style
 

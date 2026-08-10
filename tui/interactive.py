@@ -2,11 +2,12 @@
 
 屏幕模型（整屏重绘）：
 - 顶部常驻栏：项目·分支 / 状态详情 / 菜单 / 分隔线（render_header）；
-- 内容区 = 视图块（变更列表 / diff / 文件 / 恢复 / 信息）+ 日志块（ActionLog 追加）；
+- 内容区 = 视图块（变更列表 / diff / 文件）+ 日志块（ActionLog 追加）；
 - 任何部分变化 → 清屏重绘整屏；整屏文本未变 → 零输出（无效键不刷屏）。
 
-Enter 执行状态推断的推荐动作（菜单不标注键位）；Backspace 从子视图返回主屏；
-退出无专用按键，直接关闭终端窗口。顶栏在每次重绘时随状态更新。
+导航栏用 ← → 移动光标、Enter 执行选中项（推送 / 拉取 / 文件）；
+Backspace 从子视图返回主屏；退出无专用按键，直接关闭终端窗口。
+顶栏在每次重绘时随状态更新。
 """
 from __future__ import annotations
 
@@ -15,7 +16,8 @@ import webbrowser
 from typing import Callable
 
 from core.config import (COLOR_ERROR, COLOR_SUCCESS, COLOR_WARN,
-                         KEY_BACKSPACE, KEY_ENTER)
+                         KEY_BACKSPACE, KEY_ENTER, KEY_LEFT, KEY_O,
+                         KEY_RIGHT)
 from core.events import ActionLog
 from core.exceptions import PushRejectedError, SyncError
 from core.i18n import tr
@@ -24,8 +26,8 @@ from core.status import RepoInfo, RepoStatus
 from core.utils import enable_vt100, get_key, hide_cursor, show_cursor
 
 from .renderer import markup_to_ansi
-from .screen import (recommended_action, render_header, render_menu_line,
-                     render_status_line)
+from .screen import (MENU_ITEMS, menu_for_action, recommended_action,
+                     render_header, render_menu_line, render_status_line)
 
 # 清屏 + 光标回左上角；仅首次绘制顶栏时使用
 _CLEAR_SCREEN = "\x1b[2J\x1b[H"
@@ -42,8 +44,8 @@ class InteractiveApp:
 
     顶栏（render_header）只绘制一次，常驻屏幕顶部不再重绘：
     - 状态详情行变化 → ANSI 定点重写顶栏第二行；
+    - 菜单光标移动 → ANSI 定点重绘菜单行（_redraw_menu）；
     - 内容区（视图块 + 日志块）变化 → 光标定位内容区首行，清屏到末尾后重绘。
-    菜单行与分隔线自首次绘制后永不重绘。
     """
 
     def __init__(self, svc: Services, repo_path: str,
@@ -58,8 +60,8 @@ class InteractiveApp:
         self._view: str | None = None   # 视图块文本；None = 待主循环按当前状态生成
         self._logs: list[str] = []      # 日志块
         self._header_shown = False      # 顶栏是否已绘制（只绘制一次）
-        self._active: str | None = None  # 最近按下的选项键（d/f/r/i/o）
-        self._last_active: str | None = None  # 上次渲染的选中键（菜单高亮去重）
+        self._active: str | None = None  # 光标选中的菜单项 id（push/pull/files）
+        self._last_active: str | None = None  # 上次渲染的选中项（菜单高亮去重）
         self._status_ansi = ""          # 当前状态行的 ANSI 文本（定点更新比对）
         self._last_content = ""         # 上次内容区文本（去重）
         self._header_rows: int | None = None  # 顶栏行数（首次绘制后固定）
@@ -205,12 +207,18 @@ class InteractiveApp:
             self._info = info
             if self._view is None or status_changed:
                 self._view = self._main_view(info)
+            if self._active is None:
+                # 初始光标 = 推荐动作对应项，Enter 默认执行推荐动作
+                self._active = menu_for_action(recommended_action(info)[0])
             self._paint()
             key = self._key()
-            lower = key.lower() if isinstance(key, bytes) else key
             if key == KEY_BACKSPACE:
                 if self._view is not None:
                     self._set_view(None)  # Backspace 返回主屏，视图交还主循环
+            elif key == KEY_LEFT:
+                self._move_cursor(-1)
+            elif key == KEY_RIGHT:
+                self._move_cursor(1)
             elif key == KEY_ENTER:
                 # 动作前 fetch 刷新远程状态（分叉/落后检测可靠），频率低可接受
                 info = self.svc.status.get_status(fetch=True)
@@ -219,72 +227,43 @@ class InteractiveApp:
                 if status_changed:
                     self._view = self._main_view(info)
                 self._paint()
-                action = recommended_action(info)[0]
-                self._act(action, info)
-            elif lower == b"d":
-                self._active = "d"
-                self._show_diff()
-            elif lower == b"f":
-                self._active = "f"
-                if info.status == RepoStatus.DIVERGED:
-                    self._push(force=True)
-                else:
-                    from .files_view import FilesView
-                    FilesView(self.svc.file_ops, self._key, self._out,
-                              render_body=self._set_view).run()
-            elif lower == b"r":
-                self._active = "r"
-                from .restore_view import RestoreView
-                RestoreView(self.svc.restore, self.svc.git,
-                            self._key, self._out,
-                            render_body=self._set_view,
-                            max_rows=self._content_rows()).run()
-            elif lower == b"i":
-                self._active = "i"
-                self._show_info(info)
-            elif lower == b"o":
-                self._active = "o"
+                self._act_menu(self._active, info)
+            elif key == KEY_O:
+                # 隐藏快捷键：打开远程仓库，不影响菜单光标
                 self._open_remote(info)
             # 无效键：不清屏、不输出，下轮重绘内容不变则零刷新
 
     # ── 动作 ──
-    def _act(self, action: str, info: RepoInfo) -> None:
-        if action == "push":
+    def _move_cursor(self, delta: int) -> None:
+        """← → 循环移动菜单光标（越界回卷），移动由 _paint 触发菜单重绘。"""
+        if self._active is None:
+            return
+        idx = next(i for i, (item_id, _) in enumerate(MENU_ITEMS)
+                   if item_id == self._active)
+        self._active = MENU_ITEMS[(idx + delta) % len(MENU_ITEMS)][0]
+
+    def _act_menu(self, item_id: str, info: RepoInfo) -> None:
+        """执行光标选中的菜单项。"""
+        if item_id == "push":
             self._push()
-        elif action == "restore_remote":
+        elif item_id == "pull":
             self.svc.restore.restore_remote()
-        elif action == "diff":
-            self._show_diff()
-        # refresh: 循环自然重新渲染
+        elif item_id == "files":
+            from .files_view import FilesView
+            FilesView(self.svc.file_ops, self._key, self._out,
+                      render_body=self._set_view).run()
 
     def _push(self, force: bool = False) -> None:
         try:
             self.svc.sync.run(force=force)
         except PushRejectedError as e:
             self._logs.append(f"[X] {e.message}")
-            self._logs.append(tr("  按 [f] 强制推送，或先按 [r] 对齐远程",
-                                 "  Press [f] to force push, or [r] to align with remote"))
+            self._logs.append(tr("  用 ← → 选「拉取」后按 Enter 对齐远程（会丢弃本地差异）",
+                                 "  Use ← → to select Pull then Enter (discards local changes)"))
             self._paint()
         except SyncError as e:
             self._logs.append(f"[X] {e.message}")
             self._paint()
-
-    def _show_diff(self) -> None:
-        lines = self._diff_lines()
-        self._set_view("\n".join(lines) if lines
-                       else tr("工作区干净。", "Working tree clean."))
-
-    def _show_info(self, info: RepoInfo) -> None:
-        release = self.svc.gh.get_latest_release()
-        lines = [
-            tr("远程: ", "Remote:  ")
-            + (info.remote_url or tr("未配置", "not configured")),
-            tr("发布: ", "Release: ")
-            + (release["tag"] if release else tr("无", "none")),
-        ]
-        lines += [f"  {c['hash'][:8]}  {c['time']}"
-                  for c in self.svc.git.get_recent_commits(5)]
-        self._set_view("\n".join(lines))
 
     def _open_remote(self, info: RepoInfo) -> None:
         if info.remote_url:

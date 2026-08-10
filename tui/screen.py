@@ -14,6 +14,18 @@ from core.utils import get_display_width
 
 _MARKUP_RE = re.compile(r"\[/?[^\]]*\]")
 
+# 导航栏固定三项：顺序即 ← → 光标的移动顺序
+MENU_ITEMS: list[tuple[str, str]] = [
+    ("push", tr("推送", "Push")),
+    ("pull", tr("拉取", "Pull")),
+    ("files", tr("文件", "Files")),
+]
+
+
+def menu_for_action(action: str) -> str:
+    """推荐动作 → 初始光标落点菜单项（diff/refresh 无对应菜单项，落推送）。"""
+    return {"push": "push", "restore_remote": "pull"}.get(action, "push")
+
 
 def recommended_action(info: RepoInfo) -> tuple[str, str]:
     """状态 → (action_id, 标签)。action_id ∈ push/restore_remote/diff/refresh。"""
@@ -48,22 +60,18 @@ def _status_detail(info: RepoInfo) -> str:
 
 
 def render_menu(info: RepoInfo, active: str | None = None) -> str:
-    """菜单行（纯文本 markup，背景由 _menu_block 统一添加）。方括号经反斜杠转义。
+    """菜单行（纯文本 markup，背景由 _menu_block 统一添加）。
 
-    只列出带快捷键的操作项：Enter 为默认执行键不标注，退出直接关闭窗口。
-    active: 最近按下的选项键（d/f/r/i/o）；命中时该键转全大写且整项加粗。
+    导航栏固定三项：推送 / 拉取 / 文件（任何状态下一致），用 ← → 移动光标、
+    Enter 执行选中项。active: 当前光标选中的菜单项 id（push/pull/files）；
+    命中项前缀 `› ` 且加粗，未命中项用两空格占位对齐（宽度一致，光标移动不跳动）。
     """
-    if info.status == RepoStatus.DIVERGED:
-        items = [("r", tr('恢复', 'Restore')), ("f", tr('强制推送', 'Force push'))]
-    else:
-        items = [("d", tr('详情', 'Details')), ("f", tr('文件', 'Files')),
-                 ("r", tr('恢复', 'Restore')), ("i", tr('信息', 'Info'))]
     parts = []
-    for key, text in items:
-        if active == key:
-            parts.append(f"[bold]\\[{key.upper()}] {text}[/]")
+    for item_id, text in MENU_ITEMS:
+        if active == item_id:
+            parts.append(f"[bold]› {text}[/]")
         else:
-            parts.append(f"\\[{key}] {text}")
+            parts.append(f"  {text}")
     return "  ".join(parts)
 
 
@@ -116,9 +124,10 @@ def _menu_block(info: RepoInfo, width: int, active: str | None = None) -> str:
     return "\n".join([blank, render_menu_line(info, active, width), blank])
 
 
-def render_main(info: RepoInfo, project_name: str) -> str:
+def render_main(info: RepoInfo, project_name: str,
+                active: str | None = None) -> str:
     """主屏三行：项目名(URL) / 分支·状态详情 / 菜单。"""
-    line3 = render_menu(info)
+    line3 = render_menu(info, active)
     return "\n".join([_project_line(info, project_name),
                       render_status_line(info), line3])
 
