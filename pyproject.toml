@@ -1,0 +1,20 @@
+# GitHubSync 打包元数据：pip install -e . 后提供全局 githubsync 命令
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "githubsync"
+version = "3.0.0"
+description = "CLI-first GitHub sync tool: see, decide, act, done"
+requires-python = ">=3.12"
+dependencies = ["rich>=13.0"]
+
+[project.scripts]
+githubsync = "main:main"
+
+[tool.setuptools]
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+include = ["cli*", "core*", "tui*"]

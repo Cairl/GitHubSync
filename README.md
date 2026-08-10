@@ -1,25 +1,25 @@
 # GitHubSync
 
-> 基于 Rich 的 GitHub 仓库同步 TUI 工具 —— 可视化推送文件、恢复版本、自动发布 Release
+> CLI-first 的 GitHub 仓库同步工具 —— 查看状态、提交推送、恢复版本、自动发布 Release
 
 ## 功能特性
 
-- **双模式操作**：推送模式 / 恢复模式，通过左右方向键切换
-- **双栏界面**：左侧模式导航栏 + 文件与版本列表，右侧信息面板（项目状态 / 操作日志），形似打开的书
-- **智能同步**：自动初始化 Git 仓库、创建 .gitignore、配置远程、提交推送
-- **文件级控制**：可视化文件列表，支持逐个文件的推送（添加到 Git）和删除（加入 .gitignore）
-- **物理删除确认**：删除文件时提供确认弹窗，支持彻底删除或仅忽略
-- **版本恢复**：浏览最近 20 个 commit 记录，按回车即可恢复到任意历史版本
-- **自动版本发布**：基于日历版本号（`YYwWWx` 格式）自动计算版本号，读取 changelog.md 发布 GitHub Release
-- **手动确认**：模式选择后按回车确认，任务完成后按 Q 键退出
-- **Catppuccin Mocha 主题**：24 位 RGB 配色，文件状态标签（+/-）带颜色区分
-- **远程仓库管理**：按 O 键在浏览器中打开 GitHub 仓库页面，支持自动创建仓库
+- **CLI 子命令**：`status` / `push` / `restore` / `diff` / `info`，支持 `--json` / `--yes` / `--force` 等参数，退出码 0/1/2/3 语义化
+- **极简交互模式**：无子命令直接启动，顶栏常驻（项目 / 分支·状态 / 菜单），Enter 一键执行推荐动作
+- **智能同步**：自动初始化 Git 仓库、创建 .gitignore、配置远程、提交推送；分叉需显式 `--force`，不自动强推
+- **文件级控制**：文件视图展示变化/忽略文件列表，Enter 切换推送（加入 Git）与忽略（加入 .gitignore）
+- **版本恢复**：浏览最近 20 个 commit，回车选择并确认后 `reset --hard` 到任意历史版本；支持对齐远程
+- **自动版本发布**：基于日历版本号（`YYwWWx`）自动计算版本号，读取 changelog.md 发布 GitHub Release
+- **默认执行**：Enter 一键执行当前状态的推荐动作（菜单不标注键位），子视图用 Backspace 返回，退出直接关闭窗口
+- **中英双语**：全部用户可见文案按系统语言自动切换（`GITHUBSYNC_LANG` 可覆盖）
+- **POSIX 输出契约**：结果走 stdout、诊断走 stderr、按 isatty 自动着色
+- **远程仓库管理**：按 `o` 在浏览器中打开 GitHub 仓库页面，支持自动创建仓库
 - **智能错误处理**：推送失败时解析具体错误原因（网络、认证、冲突等），支持自动重试和强制推送
 
 ## 技术栈
 
-- Python 3.x
-- **Rich** >= 13.0（终端输出增强，Live 渲染引擎）
+- Python 3.12+
+- **Rich** >= 13.0（终端输出增强）
 - **GitHub CLI** (`gh`)：用于 Releases 管理和仓库操作
 - **Git**：核心同步引擎
 
@@ -41,11 +41,20 @@ pip install -r requirements.txt
 ### 基本用法
 
 ```bash
-# 同步当前工作目录
-python -m src
+# 安装为全局命令（任意目录敲 githubsync 即同步当前目录）
+pip install -e .
+
+# 同步当前工作目录（交互模式）
+python -m main
 
 # 同步指定目录
-python -m src /path/to/your/repo
+python -m main /path/to/your/repo
+
+# CLI 子命令
+python -m main status
+python -m main push --yes
+python -m main diff
+python -m main info
 ```
 
 ### 通过 bat 脚本启动
@@ -54,67 +63,65 @@ python -m src /path/to/your/repo
 github_sync.bat
 ```
 
-该脚本会将项目所在目录作为同步目标。
+该脚本会将项目所在目录作为同步目标，进入交互模式。
 
-### 操作方式
+### 交互模式操作
 
-| 阶段 | 按键 | 功能 |
-|------|------|------|
-| 模式选择 | ← / → | 切换推送模式 / 恢复模式 |
-| 模式选择 | Enter | 确认当前高亮模式 |
-| 文件列表 | ↑ / ↓ | 选择文件 |
-| 文件列表 | Enter（第1次）| 展开操作项 |
-| 文件列表 | Enter（第2次）| 执行推送/删除操作 |
-| 版本列表 | ↑ / ↓ | 选择历史版本 |
-| 版本列表 | Enter（第1次）| 展开恢复操作 |
-| 版本列表 | Enter（第2次）| 执行版本恢复 |
-| 任意阶段 | O | 在浏览器中打开远程仓库 |
-| 任意阶段 | Q | 退出程序 |
+| 按键 | 功能 |
+|------|------|
+| `Enter` | 执行状态推断的推荐动作（推送 / 对齐远程 / 查看差异） |
+| `d` | 查看文件级变化详情（diff 视图） |
+| `f` | 文件视图：`↑` `↓` 移动，Enter 切换推送 / 忽略 |
+| `r` | 恢复视图：`↑` `↓` 移动，Enter 选择并 `y` 确认 |
+| `i` | 信息视图（远程 / Release / 最近提交） |
+| `o` | 在浏览器中打开远程仓库 |
+| `Backspace` / `Esc` | 从子视图返回主屏 |
 
-### 工作流程
+退出无专用按键：直接关闭终端窗口即可（Ctrl+C 兜底）。
 
-1. **启动**：自动初始化 Git 仓库（如未初始化），创建 .gitignore，尝试配置远程
-2. **推送模式**：显示文件列表，已忽略文件标记 `(已忽略)` 可推送，未忽略文件可删除
-3. **恢复模式**：显示最近 20 个 commit 记录，选择并恢复到指定版本
+### CLI 退出码
+
+| 退出码 | 含义 |
+|--------|------|
+| 0 | 成功 / 干净 |
+| 1 | 检测到待同步变化 |
+| 2 | 分叉 / 冲突 |
+| 3 | 操作失败 |
 
 ## 项目结构
 
 ```
 GitHubSync/
-├── github_sync.bat          # Windows 启动脚本
-├── requirements.txt          # Python 依赖
-├── changelog.md              # 版本更新日志（供 Release 读取）
-├── AGENTS.md                 # 开发文档
-├── tests/                    # pytest 单测（FakeProvider 注入，无需真实 git/gh）
-└── src/
-    ├── __init__.py           # 包入口，版本号 2.1.0
-    ├── __main__.py           # 组合根：唯一组装依赖的地方（create_app）
-    ├── config.py             # 颜色主题、键盘映射、布局常量
-    ├── utils.py              # 工具函数：VT100、按键、宽度计算
-    ├── domain/               # 领域层：异常体系、事件总线、协议接口、状态机（零 I/O）
-    ├── application/          # 应用层：同步/恢复/发布/文件级操作 四类用例服务（可单测）
-    ├── infrastructure/       # 基础设施层：git/gh CLI 适配器、gitignore 解析（可替换）
-    └── presentation/         # 表现层：Rich Live 主循环、渲染器、模式组件（策略模式）
+├── main.py                # 入口：argparse 调度 + create_services 唯一组装点
+├── github_sync.bat        # Windows 启动器
+├── pyproject.toml         # 打包元数据（全局 githubsync 命令）
+├── requirements.txt       # Python 依赖
+├── changelog.md           # 版本更新日志（供 Release 读取）
+├── AGENTS.md              # 开发文档
+├── cli/                   # CLI 表现层（parser / commands / output / exit_codes）
+├── core/                  # 业务层（Provider 协议 + 用例服务 + gitignore 解析）
+├── tui/                   # 交互表现层（screen / interactive / files_view / restore_view）
+└── tests/                 # pytest 单测（FakeProvider 注入，无需真实 git/gh）
 ```
 
-> 架构细节见 `docs/architecture-refactor.md`。依赖规则：表现层 → 应用层 → 领域层 → 基础设施层，
-> 接口定义在领域层、实现在基础设施层，新增模式 = 实现 Mode 协议 + 注册一行。
+> 架构细节见 `AGENTS.md`。依赖规则：cli/ 与 tui/ 只依赖 core/，core/ 不依赖表现层；
+> 接口定义在 `core/protocols.py`、实现在 `core/git_provider.py` / `core/github_provider.py`。
 
 ## 配置说明
 
-所有布局和样式常量集中在 `src/config.py`：
+所有布局和样式常量集中在 `core/config.py`：
 
-- **Catppuccin Mocha 配色方案**：红 `#F38BA8`、绿 `#A6E3A1`、黄 `#F9E2AF`、蓝 `#89B4FA`、白 `#CDD6F4`
-- **日志级别样式**：ACTION（正在）/ DONE（完成）/ FAIL（失败）/ NOTE（注意），各带独立颜色
-- **键盘映射**：方向键、Enter、Esc、Q、O
+- **语义色（GitHub Primer 配色）**：成功 `#3FB950`、警告 `#F6E2B7`、错误 `#F85149`、次要 `#8B949E`
+- **键盘映射**：Enter（推荐动作）、D / F / R / I / O、Backspace / Esc（返回）、方向键
 - **操作冷却**：每次操作执行后有 1 秒冷却期，防止误触
+- **语言覆盖**：`GITHUBSYNC_LANG=zh|en` 强制指定界面语言
 
 ## 系统要求
 
-- Windows 操作系统（依赖 `msvcrt`）
+- Windows 操作系统（交互模式依赖 `msvcrt`）
 - Git
 - GitHub CLI (`gh`)，需已登录
-- Python 3.x
+- Python 3.12+
 
 ## 许可证
 
