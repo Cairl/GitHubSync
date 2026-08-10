@@ -524,3 +524,57 @@ def test_pull_view_no_cyan_when_remote_head_absent():
     assert "[#39C5CF]" not in view._render_label("abcdef1234567890", "2026-01-01 00:00:00")
     view._remote_head = "abcdef1234567890"
     assert "[#39C5CF]abcdef12[/]" in view._render_label("abcdef1234567890", "2026-01-01 00:00:00")
+
+
+# ── 无回显化：推送状态机 ──
+def test_push_marks_progress_then_done(monkeypatch):
+    """按 Enter 推送：文件标记先 [·] 后 [✓]，且无 ActionLog 回显。"""
+    import tui.interactive as ti
+    monkeypatch.setattr(ti.time, "sleep", lambda s: None)
+    svc = make_tui_services(initialized=True, remote="x",
+                            files={"a.py": "1", "b.py": "2"})
+    out_lines = []
+    app = InteractiveApp(svc, "fake_repo",
+                         key_source=scripted([KEY_ENTER]),
+                         out=out_lines.append)
+    with pytest.raises(StopIteration):
+        app.run()
+    joined = "\n".join(out_lines)
+    assert "·" in joined     # 上传中标记出现过
+    assert "✓" in joined     # 完成标记出现
+    assert "Scanning changes" not in joined  # 无 ActionLog 过程回显
+    assert svc.git.commits   # 确实推送了
+
+
+def test_push_failure_marks_error_no_reason(monkeypatch):
+    """推送失败：所有文件 [✕]，不显示失败原因（完全无回显）。"""
+    import tui.interactive as ti
+    monkeypatch.setattr(ti.time, "sleep", lambda s: None)
+    svc = make_tui_services(initialized=True, remote="x", files={"a.py": "1"})
+    svc.git.fail_mode = "network"  # 持久推送失败 → SyncError
+    out_lines = []
+    app = InteractiveApp(svc, "fake_repo",
+                         key_source=scripted([KEY_ENTER]),
+                         out=out_lines.append)
+    with pytest.raises(StopIteration):
+        app.run()
+    joined = "\n".join(out_lines)
+    assert "✕" in joined
+    assert "unable to access" not in joined  # 无失败原因
+    assert "Scanning changes" not in joined  # 无过程回显
+
+
+def test_push_no_changes_no_status_markers(monkeypatch):
+    """无待推文件（如仅初始化仓库）时不显示状态标记，仍正常执行。"""
+    import tui.interactive as ti
+    monkeypatch.setattr(ti.time, "sleep", lambda s: None)
+    svc = make_tui_services(initialized=False, remote=None)
+    out_lines = []
+    app = InteractiveApp(svc, "fake_repo",
+                         key_source=scripted([KEY_ENTER]),
+                         out=out_lines.append)
+    with pytest.raises(StopIteration):
+        app.run()
+    joined = "\n".join(out_lines)
+    assert "·" not in joined and "✓" not in joined
+    assert svc.git.initialized  # 仓库已初始化

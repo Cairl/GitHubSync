@@ -12,13 +12,13 @@ Backspace 从子视图返回主屏；退出无专用按键，直接关闭终端�
 from __future__ import annotations
 
 import os
+import time
 import webbrowser
 from typing import Callable
 
-from core.config import (COLOR_ERROR, COLOR_SUCCESS, COLOR_WARN,
+from core.config import (COLOR_ERROR, COLOR_GRAY, COLOR_SUCCESS, COLOR_WARN,
                          KEY_BACKSPACE, KEY_ENTER, KEY_LEFT, KEY_O,
                          KEY_RIGHT)
-from core.events import ActionLog
 from core.exceptions import SyncError
 from core.i18n import tr
 from core.services import Services
@@ -37,6 +37,8 @@ _MAX_LOG_LINES = 20
 _CHANGE_CN = {"A": "[+]", "M": "[~]", "D": "[-]"}
 # 符号语义色：新增=成功绿 / 修改=警告黄 / 删除=错误红
 _CHANGE_COLOR = {"A": COLOR_SUCCESS, "M": COLOR_WARN, "D": COLOR_ERROR}
+# 推送状态符号 → 语义色：上传中=次要灰 / 完成=成功绿 / 失败=错误红
+_PUSH_COLOR = {"·": COLOR_GRAY, "✓": COLOR_SUCCESS, "✕": COLOR_ERROR}
 
 
 class InteractiveApp:
@@ -65,16 +67,10 @@ class InteractiveApp:
         self._status_ansi = ""          # 当前状态行的 ANSI 文本（定点更新比对）
         self._last_content = ""         # 上次内容区文本（去重）
         self._header_rows: int | None = None  # 顶栏行数（首次绘制后固定）
-        svc.bus.subscribe(ActionLog, self._on_log)
+        self._push_state: dict[str, str] | None = None  # {文件路径: 状态符号}
+        self._push_paths: list[str] = []                 # 推送中的文件路径
 
     # ── 渲染 ──
-    def _on_log(self, e: ActionLog) -> None:
-        prefix = {"DONE": "[OK]", "FAIL": "[X]", "ACTION": ">"}.get(e.level, ">")
-        self._logs.append(f"{prefix} {e.message}")
-        if len(self._logs) > _MAX_LOG_LINES:
-            del self._logs[: len(self._logs) - _MAX_LOG_LINES]
-        self._paint()
-
     def _set_view(self, text: str | None) -> None:
         """替换视图块；传 None 表示交还主循环按当前状态重新生成。"""
         self._view = text
@@ -190,6 +186,15 @@ class InteractiveApp:
         lines = self._diff_lines()
         return "\n".join(lines) if lines else ""
 
+    def _render_push_lines(self) -> list[str]:
+        """推送状态行：按 _push_paths + _push_state 渲染（不依赖 porcelain 实时状态）。"""
+        lines = []
+        for path in self._push_paths:
+            sym = (self._push_state or {}).get(path, "·")
+            label = markup_to_ansi(f"[{_PUSH_COLOR[sym]}]{sym}[/]")
+            lines.append(f"{label} {path}")
+        return lines
+
     # ── 主循环 ──
     def run(self) -> int:
         enable_vt100()
@@ -258,11 +263,27 @@ class InteractiveApp:
                       render_body=self._set_view).run()
 
     def _push(self) -> None:
+        from cli.output import format_diff
+        paths = [line[3:] for line in format_diff(self.svc.git.get_porcelain())
+                 if len(line) >= 3 and line[1] == " "]
+        if paths:
+            self._push_paths = paths
+            self._push_state = {p: "·" for p in paths}
+            self._view = "\n".join(self._render_push_lines())
+            self._paint()  # 界面显示全部 [·]（上传中）
         try:
             self.svc.sync.run()
-        except SyncError as e:
-            self._logs.append(f"[X] {e.message}")
-            self._paint()
+            if paths:
+                self._push_state = {p: "✓" for p in paths}
+        except SyncError:
+            if paths:
+                self._push_state = {p: "✕" for p in paths}
+        if paths:
+            self._view = "\n".join(self._render_push_lines())
+            self._paint()  # 显示 [✓] / [✕]
+            time.sleep(1)  # 停留 1 秒让用户看清结果
+            self._push_state = None
+            self._push_paths = []
 
     def _open_remote(self, info: RepoInfo) -> None:
         if info.remote_url:
