@@ -187,11 +187,15 @@ class InteractiveApp:
         return "\n".join(lines) if lines else ""
 
     def _render_push_lines(self) -> list[str]:
-        """推送状态行：按 _push_paths + _push_state 渲染（不依赖 porcelain 实时状态）。"""
+        """推送状态行：按 _push_paths + _push_state 渲染（不依赖 porcelain 实时状态）。
+
+        符号带方括号（[·]/[✓]/[✕]），与 diff 列表 [~]/[+]/[-] 风格一致；
+        方括号经反斜杠转义，防 Rich markup 误解析。
+        """
         lines = []
         for path in self._push_paths:
             sym = (self._push_state or {}).get(path, "·")
-            label = markup_to_ansi(f"[{_PUSH_COLOR[sym]}]{sym}[/]")
+            label = markup_to_ansi(f"[{_PUSH_COLOR[sym]}]\\[{sym}][/]")
             lines.append(f"{label} {path}")
         return lines
 

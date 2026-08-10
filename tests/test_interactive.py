@@ -540,8 +540,8 @@ def test_push_marks_progress_then_done(monkeypatch):
     with pytest.raises(StopIteration):
         app.run()
     joined = "\n".join(out_lines)
-    assert "·" in joined     # 上传中标记出现过
-    assert "✓" in joined     # 完成标记出现
+    assert "[·]" in joined  # 上传中标记出现过（带方括号）
+    assert "[✓]" in joined  # 完成标记出现（带方括号）
     assert "Scanning changes" not in joined  # 无 ActionLog 过程回显
     assert svc.git.commits   # 确实推送了
 
@@ -559,7 +559,7 @@ def test_push_failure_marks_error_no_reason(monkeypatch):
     with pytest.raises(StopIteration):
         app.run()
     joined = "\n".join(out_lines)
-    assert "✕" in joined
+    assert "[✕]" in joined
     assert "unable to access" not in joined  # 无失败原因
     assert "Scanning changes" not in joined  # 无过程回显
 
