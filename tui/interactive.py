@@ -270,6 +270,11 @@ class InteractiveApp:
         from cli.output import format_diff
         paths = [line[3:] for line in format_diff(self.svc.git.get_porcelain())
                  if len(line) >= 3 and line[1] == " "]
+        if not paths and self._info and self._info.ahead > 0:
+            # AHEAD 且工作区干净：变更已提交未推送，porcelain 无文件可列；
+            # 用占位行表达推送本地提交，否则推送期间界面空白无任何反馈
+            paths = [tr(f"推送 {self._info.ahead} 个本地提交",
+                        f"Pushing {self._info.ahead} local commit(s)")]
         if paths:
             self._push_paths = paths
             self._push_state = {p: "·" for p in paths}

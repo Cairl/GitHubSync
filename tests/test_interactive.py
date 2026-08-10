@@ -578,3 +578,21 @@ def test_push_no_changes_no_status_markers(monkeypatch):
     joined = "\n".join(out_lines)
     assert "·" not in joined and "✓" not in joined
     assert svc.git.initialized  # 仓库已初始化
+
+
+def test_push_ahead_clean_tree_shows_placeholder(monkeypatch):
+    """AHEAD 且工作区干净（变更已提交未推送）：推送视图显示本地提交占位行而非空白。"""
+    import tui.interactive as ti
+    monkeypatch.setattr(ti.time, "sleep", lambda s: None)
+    # ahead=1 + 无 files → porcelain 为空 → 状态 AHEAD，工作区干净
+    svc = make_tui_services(initialized=True, remote="x", ahead=1)
+    out_lines = []
+    app = InteractiveApp(svc, "fake_repo",
+                         key_source=scripted([KEY_ENTER]),
+                         out=out_lines.append)
+    with pytest.raises(StopIteration):
+        app.run()
+    joined = "\n".join(out_lines)
+    assert "[·]" in joined  # 上传中占位标记
+    assert "[✓]" in joined  # 完成标记
+    assert "1 local commit" in joined  # 占位行表达推送本地提交
