@@ -16,9 +16,10 @@ COLOR_URL = "#F6E2B7"       # 主页地址（米黄）
 COLOR_LABEL = "#666666"     # 标签（项目/分支/主页 冒号左边）
 COLOR_MENU_BG = "#292929"   # 菜单行背景
 COLOR_MENU_ACTIVE_BG = "#636363"  # 菜单光标选中项底色框选
+COLOR_MENU_ACTIVE_FG = "#FFFFFF"  # 菜单光标选中项前景色（显式指定后 bold 在 Windows 终端才生效）
 COLOR_BRANCH = "#58A6FF"    # 分支名（CLI status 用）
 COLOR_BRANCH_NAME = "#CDD6F4"  # 分支名（TUI 顶栏，Catppuccin Mocha 白）
-COLOR_CYAN = "#3A96DD"    # 蓝：本地与远程一致的版本（拉取视图标注）
+COLOR_CYAN = "#ABDFA7"    # 浅绿：与 [✓] 同色（COLOR_SUCCESS_SOFT），本地与远程一致的版本（拉取视图标注）
 
 # ─── 键盘扫描码（msvcrt 单键，仅交互模式使用）───────
 KEY_UP = b"H"
