@@ -90,4 +90,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp = base("info", tr("远程地址、提交、Release", "remote URL, commits, release"))
     sp.add_argument("--json", action="store_true",
                     help=tr("机器可读输出", "machine-readable output"))
+
+    # 不用 base()：branch 位置参数必须先于 path 注册，否则分支名被吞成路径
+    sp = sub.add_parser("switch", help=tr("切换分支", "switch branch"))
+    sp.add_argument("branch", help=tr("目标分支名", "target branch name"))
+    sp.add_argument("path", nargs="?", default=None,
+                    help=tr("仓库目录（默认当前目录）",
+                            "repo directory (default: cwd)"))
+    sp.add_argument("-C", "--repo", default=None,
+                    help=tr("仓库目录（等价于位置参数）",
+                            "repo directory (same as path)"))
+    sp.add_argument("-c", "--create", action="store_true",
+                    help=tr("新建分支并切换", "create branch and switch"))
     return p

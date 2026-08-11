@@ -7,6 +7,7 @@
     githubsync restore    # 恢复 commit / 对齐远程
     githubsync diff       # 文件级变化列表
     githubsync info       # 远程地址 / 最近提交 / 最新 Release
+    githubsync switch     # 切换分支（-c 新建并切换）
 """
 from __future__ import annotations
 

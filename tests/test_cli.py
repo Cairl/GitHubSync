@@ -15,6 +15,7 @@ from core.status_service import StatusService
 from core.sync_service import SyncService
 from cli import commands
 from cli.exit_codes import EXIT_CHANGES, EXIT_DIVERGED, EXIT_FAILED, EXIT_OK
+from cli.parser import build_parser
 from cli.output import format_diff, status_line, status_markup
 from core import i18n
 from core.events import DomainEventBus
@@ -225,3 +226,53 @@ def test_no_ansi_when_stdout_not_tty():
     out = buf.getvalue()
     assert "\x1b[" not in out  # 无 ANSI CSI 序列
     assert "synced" in out
+
+
+# ── switch 命令 ──
+def test_cmd_switch_success():
+    svc = make_services(initialized=True, remote="x",
+                        branches=["main", "feature"])
+    code, out, _ = run(commands.cmd_switch,
+                       Args(branch="feature", create=False), svc)
+    assert code == EXIT_OK
+    assert "feature" in out                      # 结果走 stdout
+    assert svc.git.branch == "feature"
+
+
+def test_cmd_switch_create():
+    svc = make_services(initialized=True, remote="x")
+    code, _, _ = run(commands.cmd_switch,
+                     Args(branch="dev", create=True), svc)
+    assert code == EXIT_OK
+    assert ("dev", True) in svc.git.switch_calls
+    assert svc.git.branch == "dev"
+
+
+def test_cmd_switch_dirty_blocked():
+    """脏区拦截：退出码 3，诊断走 stderr，stdout 零输出，分支不变。"""
+    svc = make_services(initialized=True, remote="x",
+                        branches=["main", "feature"], files={"a": "1"})
+    code, out, err = run(commands.cmd_switch,
+                         Args(branch="feature", create=False), svc)
+    assert code == EXIT_FAILED
+    assert "Uncommitted" in err
+    assert out == ""
+    assert svc.git.branch == "main"
+
+
+def test_cmd_switch_unknown_branch_fails():
+    svc = make_services(initialized=True, remote="x")
+    code, _, err = run(commands.cmd_switch,
+                       Args(branch="nope", create=False), svc)
+    assert code == EXIT_FAILED
+    assert "Failed to switch branch" in err
+
+
+def test_switch_registered():
+    assert "switch" in commands.COMMANDS
+    parser_args = build_parser().parse_args(["switch", "feature"])
+    assert parser_args.command == "switch"
+    assert parser_args.branch == "feature"      # branch 不被吞成 path
+    assert parser_args.path is None
+    parser_create = build_parser().parse_args(["switch", "-c", "dev"])
+    assert parser_create.branch == "dev" and parser_create.create is True

@@ -152,10 +152,21 @@ def cmd_info(args, svc: Services) -> int:
     return EXIT_OK
 
 
+def cmd_switch(args, svc: Services) -> int:
+    """切换/新建分支：结果走 stdout，失败诊断走 stderr。"""
+    ok, msg = svc.branch.switch(args.branch, create=args.create)
+    if ok:
+        echo(tr(f"已切换到 {args.branch}", f"Switched to {args.branch}"))
+        return EXIT_OK
+    print_error(msg)
+    return EXIT_FAILED
+
+
 COMMANDS = {
     "status": cmd_status,
     "push": cmd_push,
     "restore": cmd_restore,
     "diff": cmd_diff,
     "info": cmd_info,
+    "switch": cmd_switch,
 }
