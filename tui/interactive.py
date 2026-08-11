@@ -22,6 +22,7 @@ from core.services import Services
 from core.status import RepoInfo
 from core.utils import enable_vt100, get_key, hide_cursor, show_cursor
 
+from .branch_view import BranchView
 from .files_view import FilesView
 from .pull_view import PullView
 from .push_view import PushView
@@ -37,7 +38,7 @@ _MAX_LOG_LINES = 20
 
 
 class InteractiveApp:
-    """无子命令时的默认入口：标签页单循环（推送 / 拉取 / 文件）。
+    """无子命令时的默认入口：标签页单循环（推送 / 拉取 / 文件 / 分支）。
 
     顶栏（render_header）只绘制一次，常驻屏幕顶部不再重绘：
     - 状态详情行变化 → ANSI 定点重写顶栏第二行；
@@ -75,6 +76,8 @@ class InteractiveApp:
                              paint=self._set_view),
             "pull": PullView(svc.restore, svc.git, max_rows=self._content_rows),
             "files": FilesView(svc.file_ops),
+            "branch": BranchView(svc.branch, svc.git,
+                                 max_rows=self._content_rows),
         }
 
     # ── 渲染 ──

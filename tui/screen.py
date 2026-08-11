@@ -14,11 +14,12 @@ from core.utils import get_display_width
 
 _MARKUP_RE = re.compile(r"\[/?[^\]]*\]")
 
-# 导航栏固定三项：顺序即 ← → 标签页的切换顺序
+# 导航栏固定四项：顺序即 ← → 标签页的切换顺序
 MENU_ITEMS: list[tuple[str, str]] = [
     ("push", tr("推送", "Push")),
     ("pull", tr("拉取", "Pull")),
     ("files", tr("文件", "Files")),
+    ("branch", tr("分支", "Branch")),
 ]
 
 

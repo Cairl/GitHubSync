@@ -85,10 +85,11 @@ def test_render_main_status_branch_colored():
     assert "#3FB950" not in out_clean
 
 
-def test_render_menu_uniform_three_items():
-    """导航栏固定三项（推送/拉取/文件），分叉时不再切换为恢复/强制推送。"""
+def test_render_menu_uniform_items():
+    """导航栏固定四项（推送/拉取/文件/分支），分叉时不再切换为恢复/强制推送。"""
     menu = _strip_markup(render_menu(_info(RepoStatus.DIVERGED, ahead=1, behind=1)))
     assert "Push" in menu and "Pull" in menu and "Files" in menu
+    assert "Branch" in menu
     assert "Restore" not in menu and "Force push" not in menu
     assert "[p]" not in menu and "[l]" not in menu and "[f]" not in menu  # 无快捷键标识
 
@@ -96,12 +97,12 @@ def test_render_menu_uniform_three_items():
 def test_render_menu_cursor_marks_active():
     """仅选中项带可见括号 + 底色紧贴内容（两侧各 1 格，槽内居中），未选中项裸文本。"""
     menu = render_menu(_info(RepoStatus.CLEAN), active="push")
-    assert " [bold #FFFFFF on #636363] \\[Push] [/]  " in menu
+    assert "  [bold #FFFFFF on #636363] \\[Push] [/]  " in menu
     assert "[#292929]" not in menu  # 无隐形括号
     sel = _strip_markup(menu)
     assert "[Push]" in sel and "[Pull]" not in sel and "[Files]" not in sel
     menu_right = render_menu(_info(RepoStatus.CLEAN), active="files")
-    assert " [bold #FFFFFF on #636363] \\[Files] [/] " in menu_right
+    assert " [bold #FFFFFF on #636363] \\[Files] [/]  " in menu_right
     assert "[#292929]" not in menu_right
     sel_right = _strip_markup(menu_right)
     assert "[Files]" in sel_right and "[Push]" not in sel_right
@@ -168,10 +169,11 @@ def test_initial_tab_follows_recommendation():
 
 
 def test_tab_switch_wraps():
-    """CLEAN 初始推送页，右移 3 次回卷回推送页。"""
+    """CLEAN 初始推送页，右移 4 次回卷回推送页。"""
     svc = make_services(initialized=True, remote="x")
     app = InteractiveApp(svc, "fake_repo",
-                         key_source=scripted([KEY_RIGHT, KEY_RIGHT, KEY_RIGHT]),
+                         key_source=scripted([KEY_RIGHT, KEY_RIGHT, KEY_RIGHT,
+                                              KEY_RIGHT]),
                          out=lambda s: None)
     with pytest.raises(StopIteration):
         app.run()
@@ -339,18 +341,19 @@ def test_menu_brackets_only_on_selected():
                    (RepoStatus.DIVERGED, {"ahead": 1, "behind": 1})]:
         base = _strip_markup(render_menu(_info(st, **kw)))  # active=None 全未选中
         assert "[" not in base and "]" not in base, f"{st.name}: {base!r}"
-        for active in ("push", "pull", "files"):
+        for active in ("push", "pull", "files", "branch"):
             t = _strip_markup(render_menu(_info(st, **kw), active=active))
             assert t.count("[") == 1 and t.count("]") == 1, \
                 f"{st.name} active={active}: {t!r}"
-            name = {"push": "Push", "pull": "Pull", "files": "Files"}[active]
+            name = {"push": "Push", "pull": "Pull",
+                    "files": "Files", "branch": "Branch"}[active]
             # 选中项恰一个括号对；带 * 时括号包住 *文本*（星逻辑由 sync_marks 测试覆盖）
             assert f"[{name}]" in t or f"[*{name}*]" in t, \
                 f"{st.name} active={active}: {t!r}"
 
 
 def test_menu_widths_selected_vs_unselected():
-    """三项槽位等宽（11 列），行总宽恒 33，与选中项/同步标记无关。
+    """四项槽位等宽（12 列），行总宽恒 48，与选中项/同步标记无关。
 
     框选左右移动、`*` 增减只改槽内留白：未选中项文本列位置在任何
     active 下零偏移；自身被选中时仅槽内居中位置微调（括号 +2）。
@@ -359,10 +362,10 @@ def test_menu_widths_selected_vs_unselected():
                    (RepoStatus.CHANGED, {"modified": 1}),
                    (RepoStatus.DIVERGED, {"ahead": 1, "behind": 1})]:
         base = _strip_markup(render_menu(_info(st, **kw)))  # active=None 全未选中
-        assert len(base) == 33, f"{st.name}: {base!r} len={len(base)}"
-        for active in ("push", "pull", "files"):
+        assert len(base) == 48, f"{st.name}: {base!r} len={len(base)}"
+        for active in ("push", "pull", "files", "branch"):
             text = _strip_markup(render_menu(_info(st, **kw), active=active))
-            assert len(text) == 33, \
+            assert len(text) == 48, \
                 f"{st.name} active={active}: {text!r} len={len(text)}"
     # 未选中项位置不受框选影响：Pull 列位置在 active=push/files/None 下一致
     positions = {_strip_markup(render_menu(_info(RepoStatus.CLEAN),

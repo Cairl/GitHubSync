@@ -273,3 +273,103 @@ def test_files_view_cursor_aligned(tmp_path):
     assert len(lines) == 2
     assert lines[0].index("a.py") == 3
     assert lines[1].index("b.py") == 3
+
+
+# ── BranchView ──
+from tui.branch_view import BranchView
+
+
+def _make_branch_view(**git_kw):
+    svc = make_services(initialized=True, remote="x", **git_kw)
+    view = BranchView(svc.branch, svc.git, max_rows=lambda: 20)
+    return svc, view
+
+
+def test_branch_view_lazy_load():
+    svc, view = _make_branch_view(branches=["main", "feature"])
+    view.activate()
+    view.activate()
+    assert svc.git.list_branches_calls == 1   # 懒加载缓存
+    view.invalidate()
+    view.activate()
+    assert svc.git.list_branches_calls == 2   # 失效重扫
+
+
+def test_branch_view_current_highlighted():
+    """当前分支名包 #ABDFA7（与 [✓] 同色），其余分支原样。"""
+    svc, view = _make_branch_view(branches=["main", "feature"])
+    view.activate()
+    assert view._render_label("main", "main") == "[#ABDFA7]main[/]"
+    assert view._render_label("feature", "feature") == "feature"
+
+
+def test_branch_view_merge_row_only_off_main():
+    """「合并到 main」首行仅在当前分支 ≠ main 时出现。"""
+    svc, view = _make_branch_view(branches=["main", "feature"])
+    view.activate()                            # 当前 main
+    assert "Merge into main" not in view.render()
+    svc, view = _make_branch_view(branches=["main", "feature"])
+    svc.git.branch = "feature"
+    view.activate()
+    assert "Merge into main" in view.render()
+
+
+def test_branch_view_enter_switches():
+    svc, view = _make_branch_view(branches=["main", "feature"])
+    view.activate()                            # 光标 0 = main
+    view.handle_key(KEY_DOWN)                  # → feature
+    stale = view.handle_key(KEY_ENTER)
+    assert stale == ["push", "pull", "files", "branch"]
+    assert svc.git.branch == "feature"
+
+
+def test_branch_view_enter_current_noop():
+    svc, view = _make_branch_view(branches=["main", "feature"])
+    view.activate()                            # 光标在 main（当前分支）
+    assert view.handle_key(KEY_ENTER) == []
+    assert svc.git.switch_calls == []
+
+
+def test_branch_view_dirty_blocked():
+    """脏区 Enter：行标 [!] 拒绝执行，分支不变，无失效返回。"""
+    svc, view = _make_branch_view(branches=["main", "feature"],
+                                  files={"a.py": "1"})
+    view.activate()
+    view.handle_key(KEY_DOWN)
+    assert view.handle_key(KEY_ENTER) == []
+    assert "feature" in view._blocked
+    assert svc.git.branch == "main"
+    assert "[!]" in view.render()
+
+
+def test_branch_view_merge_flow():
+    """首行 Enter：合并到 main 并推送，返回全部视图失效。"""
+    svc, view = _make_branch_view(branches=["main", "feature"])
+    svc.git.branch = "feature"
+    view.activate()                            # 光标 0 = 合并项
+    stale = view.handle_key(KEY_ENTER)
+    assert stale == ["push", "pull", "files", "branch"]
+    assert svc.git.branch == "main"
+    assert svc.git.merge_calls == ["feature"]
+
+
+def test_branch_view_merge_conflict_marks_failed():
+    """合并冲突：自动 abort + 切回原分支，首行标 [✕]。"""
+    svc, view = _make_branch_view(branches=["main", "feature"])
+    svc.git.branch = "feature"
+    svc.git.merge_ok = False
+    view.activate()
+    assert view.handle_key(KEY_ENTER) == []
+    assert "@merge" in view._failed
+    assert svc.git.merge_abort_calls == 1
+    assert svc.git.branch == "feature"
+    assert "[✕]" in view.render()
+
+
+def test_branch_view_cursor_aligned():
+    """选中行 › + 底色框选，未选中行 3 空格占位，正常行文本起始列均为 3。"""
+    svc, view = _make_branch_view(branches=["main", "feature"])
+    view.activate()
+    lines = view.render().splitlines()
+    assert lines[0].index("main") == 3
+    assert lines[1].index("feature") == 3
