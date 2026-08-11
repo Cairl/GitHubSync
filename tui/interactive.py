@@ -1,13 +1,13 @@
-"""极简交互模式主循环：顶栏常驻 + 内容区刷新。
+"""极简交互模式主循环：顶栏常驻 + 内容区刷新 + 标签页单循环派发。
 
-屏幕模型（整屏重绘）：
-- 顶部常驻栏：项目·分支 / 状态详情 / 菜单 / 分隔线（render_header）；
-- 内容区 = 视图块（变更列表 / diff / 文件）+ 日志块（ActionLog 追加）；
-- 任何部分变化 → 清屏重绘整屏；整屏文本未变 → 零输出（无效键不刷屏）。
+导航栏即标签栏：←/→ 直接切换标签页并即时显示内容（免 Enter）；
+↑/↓/Enter 转发当前标签视图（ViewBase.handle_key）；o 打开远程仓库；
+Backspace/Esc 与其余键均为无效键（零输出）。退出无专用按键，直接关窗口。
 
-导航栏用 ← → 移动光标、Enter 执行选中项（推送 / 拉取 / 文件）；
-Backspace 从子视图返回主屏；退出无专用按键，直接关闭终端窗口。
-顶栏在每次重绘时随状态更新。
+屏幕模型：
+- 顶部常驻栏：项目·分支 / 状态详情 / 菜单 / 分隔线（render_header）只绘一次；
+- 状态行变化 → ANSI 定点重写顶栏第二行；菜单变化 → _redraw_menu 定点重绘；
+- 内容区 = 当前标签视图块 + 日志块，变化才刷新，未变零输出（无效键不刷屏）。
 """
 from __future__ import annotations
 
@@ -15,38 +15,38 @@ import os
 import webbrowser
 from typing import Callable
 
-from core.config import (COLOR_ERROR, COLOR_PUSH_PENDING,
-                         COLOR_SUCCESS_SOFT, COLOR_WARN, KEY_BACKSPACE,
-                         KEY_ENTER, KEY_LEFT, KEY_O, KEY_RIGHT)
-from core.exceptions import SyncError
+from core.config import (KEY_DOWN, KEY_ENTER, KEY_LEFT, KEY_O, KEY_RIGHT,
+                         KEY_UP)
 from core.i18n import tr
 from core.services import Services
-from core.status import RepoInfo, RepoStatus
+from core.status import RepoInfo
 from core.utils import enable_vt100, get_key, hide_cursor, show_cursor
 
+from .files_view import FilesView
+from .pull_view import PullView
+from .push_view import PushView
 from .renderer import markup_to_ansi
 from .screen import (MENU_ITEMS, menu_for_action, recommended_action,
                      render_header, render_menu_line, render_status_line)
+from .view_base import ViewBase
 
 # 清屏 + 光标回左上角；仅首次绘制顶栏时使用
 _CLEAR_SCREEN = "\x1b[2J\x1b[H"
 # 日志块上限：超出后丢弃最旧日志，防止内容撑满一屏把顶栏顶出屏幕
 _MAX_LOG_LINES = 20
-# 单字母状态 → 符号标记（TUI 显示用；CLI format_diff 保持字母契约不变）
-_CHANGE_CN = {"A": "[+]", "M": "[~]", "D": "[-]"}
-# 符号语义色：新增=柔和浅绿 / 修改=警告黄 / 删除=错误红
-_CHANGE_COLOR = {"A": COLOR_SUCCESS_SOFT, "M": COLOR_WARN, "D": COLOR_ERROR}
-# 推送状态符号 → 语义色：上传中=暗灰 / 完成=柔和浅绿 / 失败=错误红
-_PUSH_COLOR = {"·": COLOR_PUSH_PENDING, "✓": COLOR_SUCCESS_SOFT, "✕": COLOR_ERROR}
 
 
 class InteractiveApp:
-    """无子命令时的默认入口：See → Decide → Act → Done。
+    """无子命令时的默认入口：标签页单循环（推送 / 拉取 / 文件）。
 
     顶栏（render_header）只绘制一次，常驻屏幕顶部不再重绘：
     - 状态详情行变化 → ANSI 定点重写顶栏第二行；
-    - 菜单光标移动 → ANSI 定点重绘菜单行（_redraw_menu）；
-    - 内容区（视图块 + 日志块）变化 → 光标定位内容区首行，清屏到末尾后重绘。
+    - 标签切换/同步标记增减 → ANSI 定点重绘菜单行（_redraw_menu）；
+    - 内容区（当前标签视图 + 日志块）变化 → 光标定位内容区首行，清屏到末尾后重绘。
+
+    视图数据懒加载：视图实例启动即构造但不扫描，首次 activate（切入）才加载；
+    状态签名（status/change_count/ahead/behind）变化时推送与拉取视图失效，
+    当前视图立即重扫，其余视图下次切入重扫。
     """
 
     def __init__(self, svc: Services, repo_path: str,
@@ -58,25 +58,28 @@ class InteractiveApp:
         self._out = out
         self._project = os.path.basename(self.repo_path.rstrip("\\/")) or self.repo_path
         self._info: RepoInfo | None = None
-        self._view: str | None = None   # 视图块文本；None = 待主循环按当前状态生成
-        self._logs: list[str] = []      # 日志块
-        self._header_shown = False      # 顶栏是否已绘制（只绘制一次）
-        self._active: str | None = None  # 光标选中的菜单项 id（push/pull/files）
-        self._last_menu_markup = ""  # 上次菜单行源 markup（去重：光标移动或同步标记增减）
+        self._view: str = ""              # 内容区视图块文本（当前标签 render 结果）
+        self._logs: list[str] = []        # 日志块
+        self._header_shown = False        # 顶栏是否已绘制（只绘制一次）
+        self._active: str | None = None   # 当前标签 id（push/pull/files）
+        self._last_menu_markup = ""  # 上次菜单行源 markup（去重：切换或同步标记增减）
         self._status_ansi = ""          # 当前状态行的 ANSI 文本（定点更新比对）
         self._last_content = ""         # 上次内容区文本（去重）
         self._header_rows: int | None = None  # 顶栏行数（首次绘制后固定）
-        self._push_state: dict[str, str] | None = None  # {文件路径: 状态符号}
-        self._push_paths: list[str] = []                 # 推送中的文件路径
-        self._push_result = False  # 推送结果视图锁定：常驻显示，重启软件才清除
+        self._last_sig: tuple | None = None   # 状态签名（status/count/ahead/behind）
+        # 视图注册表：构造即建（零扫描），数据懒加载在 activate
+        self._views: dict[str, ViewBase] = {
+            "push": PushView(svc.sync, svc.git,
+                             get_info=lambda: self._info,
+                             refresh_status=self._refresh_status,
+                             paint=self._set_view),
+            "pull": PullView(svc.restore, svc.git, max_rows=self._content_rows),
+            "files": FilesView(svc.file_ops),
+        }
 
     # ── 渲染 ──
-    def _set_view(self, text: str | None) -> None:
-        """替换视图块；传 None 表示交还主循环按当前状态重新生成。"""
-        if text is None:
-            self._push_result = False  # 离开视图（进子视图返回）即解除结果锁定
-            self._push_state = None    # 丢弃推送上下文，旧标记不再复用
-            self._push_paths = []
+    def _set_view(self, text: str) -> None:
+        """替换内容区视图块文本并触发增量重绘。"""
         self._view = text
         self._paint()
 
@@ -154,14 +157,14 @@ class InteractiveApp:
             # 定点重写顶栏第二行（print 自带换行，光标落点不影响后续绝对定位）
             self._out(f"\x1b[2;1H\x1b[2K{status}")
             self._status_ansi = status
-        self._redraw_menu()  # 菜单变化（光标移动 / 同步标记 * 增减）才实际输出
+        self._redraw_menu()  # 菜单变化（标签切换 / 同步标记 * 增减）才实际输出
         self._render_content(content)
 
     def _redraw_menu(self) -> None:
         """菜单行定点重绘（行号 = 顶栏行数 - 2）；源 markup 未变（如无效键）则零输出。
 
         用源 markup（含样式标签）而非 ANSI 比对：非 tty 下 ANSI 无颜色码，
-        选中/未选中差异会丢失，导致光标移动被误判为无变化。
+        选中/未选中差异会丢失，导致标签切换被误判为无变化。
         """
         y = self._header_lines() - 2
         line = render_menu_line(self._info, self._active, self._terminal_width())
@@ -169,45 +172,6 @@ class InteractiveApp:
             return
         self._last_menu_markup = line
         self._out(f"\x1b[{y};1H\x1b[2K{markup_to_ansi(line)}")
-
-    def _diff_lines(self) -> list[str]:
-        """文件级变化列表，状态用符号标记（[+]/[~]/[-]）显示，符号按语义着色。
-
-        符号单独经 markup 着色，文件名保持纯文本（防止仓库文件名中的方括号
-        被 markup 误解析）。
-        """
-        from cli.output import format_diff
-        lines = []
-        for line in format_diff(self.svc.git.get_porcelain()):
-            if len(line) >= 3 and line[1] == " ":
-                label = _CHANGE_CN.get(line[0], line[0])
-                color = _CHANGE_COLOR.get(line[0])
-                if color:
-                    label = markup_to_ansi(f"[{color}]{label}[/]")
-                lines.append(f"{label} {line[3:]}")
-            else:
-                lines.append(line)
-        return lines
-
-    def _main_view(self, info: RepoInfo) -> str:
-        """主屏视图块：有变更时显示文件级变化列表，干净/无仓库时留空。"""
-        if info.status in (RepoStatus.CLEAN, RepoStatus.NO_REPO):
-            return ""
-        lines = self._diff_lines()
-        return "\n".join(lines) if lines else ""
-
-    def _render_push_lines(self) -> list[str]:
-        """推送状态行：按 _push_paths + _push_state 渲染（不依赖 porcelain 实时状态）。
-
-        符号带方括号（[·]/[✓]/[✕]），与 diff 列表 [~]/[+]/[-] 风格一致；
-        方括号经反斜杠转义，防 markup 误解析。
-        """
-        lines = []
-        for path in self._push_paths:
-            sym = (self._push_state or {}).get(path, "·")
-            label = markup_to_ansi(f"[{_PUSH_COLOR[sym]}]\\[{sym}][/]")
-            lines.append(f"{label} {path}")
-        return lines
 
     # ── 主循环 ──
     def run(self) -> int:
@@ -220,107 +184,63 @@ class InteractiveApp:
 
     def _run(self) -> int:
         while True:
-            # 本地快速刷新（fetch=False，无网络开销；fetch 仅 Enter 动作前执行）
+            # 本地快速刷新（fetch=False，无网络开销；fetch 仅推送流程内执行）
             info = self.svc.status.get_status(fetch=False)
-            status_changed = self._info is None or info.status != self._info.status
             self._info = info
-            if self._view is None or (status_changed and not self._push_result):
-                # 推送结果视图锁定期间不因状态变化重绘主屏，结果常驻
-                self._view = self._main_view(info)
+            sig = (info.status, info.change_count, info.ahead, info.behind)
+            sig_changed = sig != self._last_sig
+            self._last_sig = sig
+            if sig_changed:
+                # 工作区/远程状态变化：推送与拉取数据可能过期
+                # （推送结果锁定期间 PushView.activate 内部豁免重扫）
+                self._views["push"].invalidate()
+                self._views["pull"].invalidate()
             if self._active is None:
-                # 初始光标 = 推荐动作对应项，Enter 默认执行推荐动作
+                # 初始标签 = 推荐动作落点，切入即显示内容
                 self._active = menu_for_action(recommended_action(info)[0])
-            self._paint()
+                self._current().activate()
+            elif sig_changed:
+                self._current().activate()  # 缓存命中零开销
+            self._set_view(self._current().render())
             key = self._key()
-            if key == KEY_BACKSPACE:
-                if self._view is not None and not self._push_result:
-                    self._set_view(None)  # Backspace 返回主屏，视图交还主循环
-            elif key == KEY_LEFT:
-                self._move_cursor(-1)
+            if key == KEY_LEFT:
+                self._switch(-1)
             elif key == KEY_RIGHT:
-                self._move_cursor(1)
-            elif key == KEY_ENTER:
-                # 推送动作先立即渲染 [·]（Enter 一瞬间反馈），再做 fetch 与同步
-                if self._active == "push":
-                    self._begin_push()
-                # fetch 刷新远程状态（分叉/落后检测可靠），频率低可接受
-                info = self.svc.status.get_status(fetch=True)
-                status_changed = info.status != self._info.status
-                self._info = info
-                if status_changed and self._push_state is None:
-                    # 推送进行中（[·] 已渲染）或结果锁定时不覆盖推送视图
-                    self._view = self._main_view(info)
-                self._paint()
-                self._act_menu(self._active, info)
+                self._switch(1)
             elif key == KEY_O:
-                # 隐藏快捷键：打开远程仓库，不影响菜单光标
+                # 隐藏快捷键：打开远程仓库，不影响标签选择
                 self._open_remote(info)
-            # 无效键：不清屏、不输出，下轮重绘内容不变则零刷新
+            elif key in (KEY_UP, KEY_DOWN, KEY_ENTER):
+                view = self._current()
+                stale = view.handle_key(key)
+                for vid in stale:
+                    self._views[vid].invalidate()
+                if self._active in stale:
+                    view.activate()  # 当前视图数据过期：立即重扫
+                self._set_view(view.render())
+            # 其余键（含 Backspace/Esc）：无效键，零输出
 
-    # ── 动作 ──
-    def _move_cursor(self, delta: int) -> None:
-        """← → 循环移动菜单光标（越界回卷），移动由 _paint 触发菜单重绘。"""
-        if self._active is None:
-            return
+    # ── 标签与动作 ──
+    def _current(self) -> ViewBase:
+        return self._views[self._active]
+
+    def _switch(self, delta: int) -> None:
+        """←/→ 循环切换标签：切出 deactivate（PushView 清结果锁定），切入 activate 即显。"""
+        old = self._current()
         idx = next(i for i, (item_id, _) in enumerate(MENU_ITEMS)
                    if item_id == self._active)
         self._active = MENU_ITEMS[(idx + delta) % len(MENU_ITEMS)][0]
+        old.deactivate()
+        view = self._current()
+        view.activate()
+        self._set_view(view.render())
 
-    def _act_menu(self, item_id: str, info: RepoInfo) -> None:
-        """执行光标选中的菜单项。"""
-        if item_id == "push":
-            self._push()
-        elif item_id == "pull":
-            # 拉取 = 选择历史 git：首项对齐远程，其余历史提交可恢复
-            from .restore_view import RestoreView
-            RestoreView(self.svc.restore, self.svc.git, self._key, self._out,
-                        render_body=self._set_view,
-                        max_rows=self._content_rows()).run()
-        elif item_id == "files":
-            from .files_view import FilesView
-            FilesView(self.svc.file_ops, self._key, self._out,
-                      render_body=self._set_view).run()
-
-    def _begin_push(self) -> None:
-        """推送前立即渲染 [·] 视图：Enter 一瞬间反馈，不等 fetch 网络等待。
-
-        计算待推文件并显示全部 [·]；无可推内容（工作区干净且无领先提交）
-        时清除旧推送结果，交还主屏。
-        """
-        from cli.output import format_diff
-        paths = [line[3:] for line in format_diff(self.svc.git.get_porcelain())
-                 if len(line) >= 3 and line[1] == " "]
-        if not paths and self._info and self._info.ahead > 0:
-            # AHEAD 且工作区干净：变更已提交未推送，porcelain 无文件可列；
-            # 用占位行表达推送本地提交，否则推送期间界面空白无任何反馈
-            paths = [tr(f"推送 {self._info.ahead} 个本地提交",
-                        f"Pushing {self._info.ahead} local commit(s)")]
-        if paths:
-            self._push_paths = paths
-            self._push_state = {p: "·" for p in paths}
-            self._view = "\n".join(self._render_push_lines())
-            self._paint()  # 界面显示全部 [·]（上传中）
-        else:
-            # 无可推内容：清除旧推送结果，交还主屏
-            self._push_result = False
-            self._push_state = None
-            self._push_paths = []
-            self._set_view(None)
-
-    def _push(self) -> None:
-        """执行推送同步；[·] 视图已由 _begin_push 预先渲染（Enter 一瞬间显示）。"""
-        paths = self._push_paths
-        try:
-            self.svc.sync.run()
-            if paths:
-                self._push_state = {p: "✓" for p in paths}
-        except SyncError:
-            if paths:
-                self._push_state = {p: "✕" for p in paths}
-        if paths:
-            self._view = "\n".join(self._render_push_lines())
-            self._paint()  # 显示 [✓] / [✕]
-            self._push_result = True  # 结果常驻：重启软件才清除
+    def _refresh_status(self, fetch: bool) -> RepoInfo:
+        """推送流程内刷新状态（fetch=True）并立即重绘顶栏。"""
+        info = self.svc.status.get_status(fetch=fetch)
+        self._info = info
+        self._paint()
+        return info
 
     def _open_remote(self, info: RepoInfo) -> None:
         if info.remote_url:

@@ -1,4 +1,4 @@
-"""极简交互模式测试：渲染纯函数、推荐动作映射、主循环与视图交互。"""
+"""极简交互模式测试：渲染纯函数、推荐动作映射、标签页主循环交互。"""
 import os
 import re
 import sys
@@ -40,7 +40,7 @@ def test_recommended_action_mapping():
 
 
 def test_menu_for_action_mapping():
-    """推荐动作 → 初始光标落点：push→推送，restore_remote→拉取，其余落推送。"""
+    """推荐动作 → 初始标签落点：push→推送，restore_remote→拉取，其余落推送。"""
     assert menu_for_action("push") == "push"
     assert menu_for_action("restore_remote") == "pull"
     assert menu_for_action("diff") == "push"
@@ -57,7 +57,7 @@ def test_render_main_contains_key_parts():
     assert "Push" in out and "Pull" in out and "Files" in out
     assert "›" not in out       # render_main 无 active 时不显示光标
     assert "[r] Restore" not in out and "[i] Info" not in out  # 旧入口已移除
-    assert "[p] Push" not in out  # 快捷键标识已移除，改为光标选择
+    assert "[p] Push" not in out  # 快捷键标识已移除，改为标签选择
 
 
 def test_render_header_shows_remote_url():
@@ -96,12 +96,12 @@ def test_render_menu_uniform_three_items():
 def test_render_menu_cursor_marks_active():
     """仅选中项带可见括号 + 底色紧贴内容（两侧各 1 格，槽内居中），未选中项裸文本。"""
     menu = render_menu(_info(RepoStatus.CLEAN), active="push")
-    assert " [bold on #636363] \\[Push] [/]  " in menu
+    assert " [bold #FFFFFF on #636363] \\[Push] [/]  " in menu
     assert "[#292929]" not in menu  # 无隐形括号
     sel = _strip_markup(menu)
     assert "[Push]" in sel and "[Pull]" not in sel and "[Files]" not in sel
     menu_right = render_menu(_info(RepoStatus.CLEAN), active="files")
-    assert " [bold on #636363] \\[Files] [/] " in menu_right
+    assert " [bold #FFFFFF on #636363] \\[Files] [/] " in menu_right
     assert "[#292929]" not in menu_right
     sel_right = _strip_markup(menu_right)
     assert "[Files]" in sel_right and "[Push]" not in sel_right
@@ -128,37 +128,11 @@ def test_render_menu_sync_marks():
     assert "[Push]" in sel_clean
 
 
-# ── 主循环与视图 ──
-from core.file_ops_service import FileOpsService
-from core.release_service import ReleaseService
-from core.restore_service import RestoreService
-from core.status_service import StatusService
-from core.sync_service import SyncService
-from core.config import (KEY_BACKSPACE, KEY_DOWN, KEY_ENTER, KEY_LEFT,
-                         KEY_RIGHT, KEY_UP)
-from core.events import DomainEventBus
-from core.services import Services
-from tui.files_view import FilesView
+# ── 标签页主循环 ──
+from core.config import (KEY_BACKSPACE, KEY_ENTER, KEY_LEFT, KEY_O,
+                         KEY_RIGHT)
+from tests.fakes import make_services
 from tui.interactive import InteractiveApp
-from tui.restore_view import RestoreView
-from tests.fakes import FakeGitHubProvider, FakeGitProvider
-
-
-def make_tui_services(**git_kw):
-    bus = DomainEventBus()
-    git = FakeGitProvider()
-    for k, v in git_kw.items():
-        setattr(git, k, v)
-    gh = FakeGitHubProvider()
-    release = ReleaseService(gh, bus, "fake_repo")
-    return Services(
-        git=git, gh=gh, bus=bus,
-        status=StatusService(git, "fake_repo"),
-        sync=SyncService(git, gh, bus, "fake_repo", release),
-        restore=RestoreService(git, bus),
-        file_ops=FileOpsService(git, bus, "fake_repo"),
-        release=release,
-    )
 
 
 def scripted(keys):
@@ -166,8 +140,92 @@ def scripted(keys):
     return lambda: next(it)
 
 
+def test_tab_switch_shows_content_immediately():
+    """←/→ 直接切换标签并即时显示内容，全程无 Enter。"""
+    svc = make_services(initialized=True, remote="x",
+                        commits=["abcdef1234567890"])
+    out_lines = []
+    app = InteractiveApp(svc, "fake_repo",
+                         key_source=scripted([KEY_RIGHT]),
+                         out=out_lines.append)
+    with pytest.raises(StopIteration):
+        app.run()
+    assert app._active == "pull"
+    assert "abcdef12" in "\n".join(out_lines)  # 拉取页内容已显示
+
+
+def test_initial_tab_follows_recommendation():
+    """BEHIND 时初始标签落拉取，内容区直接显示提交列表（无需任何按键）。"""
+    svc = make_services(initialized=True, remote="x", behind=1,
+                        commits=["abcdef1234567890"])
+    out_lines = []
+    app = InteractiveApp(svc, "fake_repo", key_source=scripted([]),
+                         out=out_lines.append)
+    with pytest.raises(StopIteration):
+        app.run()
+    assert app._active == "pull"
+    assert "abcdef12" in "\n".join(out_lines)
+
+
+def test_tab_switch_wraps():
+    """CLEAN 初始推送页，右移 3 次回卷回推送页。"""
+    svc = make_services(initialized=True, remote="x")
+    app = InteractiveApp(svc, "fake_repo",
+                         key_source=scripted([KEY_RIGHT, KEY_RIGHT, KEY_RIGHT]),
+                         out=lambda s: None)
+    with pytest.raises(StopIteration):
+        app.run()
+    assert app._active == "push"
+
+
+def test_backspace_is_dead_key():
+    """Backspace 已废弃：按后标签不变、内容不变（无效键零输出）。"""
+    svc = make_services(initialized=True, remote="x",
+                        commits=["abcdef1234567890"])
+    out_lines = []
+    app = InteractiveApp(svc, "fake_repo",
+                         key_source=scripted([KEY_RIGHT, KEY_BACKSPACE]),
+                         out=out_lines.append)
+    with pytest.raises(StopIteration):
+        app.run()
+    assert app._active == "pull"               # 仍在拉取页
+    assert "abcdef12" in "\n".join(out_lines)  # 内容仍是拉取视图
+
+
+def test_enter_on_pull_tab_aligns_remote():
+    """初始落拉取页（BEHIND），Enter 直接对齐远程（单个 Enter，无需先进入）。"""
+    svc = make_services(initialized=True, remote="x", behind=1,
+                        commits=["abcdef1234567890"])
+    app = InteractiveApp(svc, "fake_repo",
+                         key_source=scripted([KEY_ENTER]),
+                         out=lambda s: None)
+    with pytest.raises(StopIteration):
+        app.run()
+    assert svc.git.reset_to == "origin/main"
+    assert svc.git.clean_calls == 1
+
+
+def test_files_tab_switch_and_toggle(tmp_path):
+    """切到文件标签即显示文件列表；Enter 忽略文件后列表重扫（按钮翻转）。"""
+    (tmp_path / "a.py").write_text("x")
+    svc = make_services(initialized=True, remote="x")
+    svc.file_ops.repo_path = str(tmp_path)
+    out_lines = []
+    # 初始推送页 → → 到文件页（显示 a.py）→ Enter 忽略 → 重扫后按钮变 Push
+    app = InteractiveApp(svc, "fake_repo",
+                         key_source=scripted([KEY_RIGHT, KEY_RIGHT, KEY_ENTER]),
+                         out=out_lines.append)
+    with pytest.raises(StopIteration):
+        app.run()
+    joined = "\n".join(out_lines)
+    assert "a.py" in joined            # 切入即显示，无 Enter 进入
+    assert "a.py" in svc.git.gitignore_lines  # Enter 忽略生效
+    assert "Ignore" in joined          # 忽略前按钮
+    assert "Push" in joined            # 重扫后按钮翻转（已忽略文件仍在列表）
+
+
 def test_interactive_enter_pushes():
-    svc = make_tui_services(initialized=True, remote="x", files={"a.py": "1"})
+    svc = make_services(initialized=True, remote="x", files={"a.py": "1"})
     out_lines = []
     app = InteractiveApp(svc, "fake_repo",
                          key_source=scripted([KEY_ENTER]),
@@ -178,25 +236,9 @@ def test_interactive_enter_pushes():
     assert "(+1)" in "\n".join(out_lines)
 
 
-def test_interactive_backspace_returns_to_main():
-    """Backspace 清除子视图（文件视图）返回主屏。"""
-    svc = make_tui_services(initialized=True, remote="x")
-    out_lines = []
-    # 初始光标在推送（CHANGED → push），右移 2 次到「文件」，Enter 进入后 Backspace 返回
-    app = InteractiveApp(svc, "fake_repo",
-                         key_source=scripted(
-                             [KEY_RIGHT, KEY_RIGHT, KEY_ENTER, KEY_BACKSPACE]),
-                         out=out_lines.append)
-    with pytest.raises(StopIteration):
-        app.run()
-    joined = "\n".join(out_lines)
-    assert "No files." in joined    # 文件视图已渲染
-    assert joined.endswith("\x1b[J")  # 返回后内容区清空回主屏
-
-
 def test_interactive_invalid_key_no_repaint():
     """无效键 + 状态未变：主屏块不重复输出（差异化刷新）。"""
-    svc = make_tui_services(initialized=True, remote="x")
+    svc = make_services(initialized=True, remote="x")
     out_lines = []
     app = InteractiveApp(svc, "fake_repo",
                          key_source=scripted([b"z", b"z"]),
@@ -208,158 +250,9 @@ def test_interactive_invalid_key_no_repaint():
     assert joined.count("Synced, working tree clean.") == 1
 
 
-def test_files_view_include_ignored(tmp_path):
-    (tmp_path / "notes.txt").write_text("x")
-    svc = make_tui_services(initialized=True, remote="x")
-    svc.git.gitignore_lines = ["notes.txt"]
-    svc.file_ops.repo_path = str(tmp_path)
-    view = FilesView(svc.file_ops, key_source=scripted([KEY_ENTER, KEY_BACKSPACE]),
-                     out=lambda s: None)
-    view.run()
-    assert "notes.txt" not in svc.git.gitignore_lines
-
-
-def test_files_view_cursor_matches_menu_style(tmp_path):
-    """文件列表光标与导航栏同款：选中行 › 前缀 + 底色框选，未选中行等宽占位对齐。
-
-    文本起始列均为 3（选中 ` › 名 ` / 未选中 `   名 `），与 render_menu 定案一致。
-    """
-    (tmp_path / "a.py").write_text("x")
-    (tmp_path / "b.py").write_text("x")
-    svc = make_tui_services(initialized=True, remote="x")
-    svc.file_ops.repo_path = str(tmp_path)
-    out_lines = []
-    view = FilesView(svc.file_ops, key_source=scripted([KEY_BACKSPACE]),
-                     out=out_lines.append)
-    view.run()
-    block = out_lines[0]  # DiffRenderer 首次整块输出
-    lines = block.splitlines()
-    assert len(lines) == 2
-    assert lines[0].startswith(" › ")          # 选中行：› 光标（同菜单）
-    assert lines[1].startswith("   ")          # 未选中行：3 空格占位
-    assert lines[0].index("a.py") == lines[1].index("b.py") == 3  # 文本对齐
-
-
-def test_files_view_button_column_aligned(tmp_path):
-    """文件操作按钮独立一列且垂直对齐：忽略/推送按钮起点列一致，无 [已忽略] 标记。
-
-    已忽略文件按钮显示 Push（Enter 纳入同步），未忽略显示 Ignore（Enter 排除）。
-    """
-    (tmp_path / "a.py").write_text("x")
-    (tmp_path / "notes.txt").write_text("x")
-    svc = make_tui_services(initialized=True, remote="x")
-    svc.git.gitignore_lines = ["notes.txt"]
-    svc.file_ops.repo_path = str(tmp_path)
-    out_lines = []
-    view = FilesView(svc.file_ops, key_source=scripted([KEY_BACKSPACE]),
-                     out=out_lines.append)
-    view.run()
-    block = out_lines[0]  # DiffRenderer 首次整块输出
-    lines = block.splitlines()
-    assert len(lines) == 2
-    # 无 [已忽略] 标记，按钮代替状态标识
-    assert "ignored" not in block and "[已忽略]" not in block
-    assert "Push" in lines[1] and "Ignore" in lines[0]
-    # 按钮独立一列：两行按钮起点列一致（垂直对齐）
-    assert lines[0].index("Ignore") == lines[1].index("Push")
-
-
-def test_files_view_ignored_name_strikethrough():
-    """已忽略文件文件名带删除线（默认色），未忽略文件不带（状态一眼可辨）。"""
-    from tui.files_view import _render_row
-    ignored = _render_row({"name": "notes.txt", "ignored": True},
-                          selected=False, name_col=20, btn_w=6,
-                          push_text="Push", ignore_text="Ignore")
-    active = _render_row({"name": "a.py", "ignored": False},
-                         selected=False, name_col=20, btn_w=6,
-                         push_text="Push", ignore_text="Ignore")
-    assert "[strike]notes.txt[/]" in ignored
-    assert "strike #292929" not in ignored  # 删除线为默认色，无自定义颜色
-    assert "[strike" not in active
-    assert "Push" in ignored and "Ignore" in active
-
-
-def test_files_view_push_button_blue():
-    """「推送」按钮蓝色（#58A6FF），「忽略」按钮保持默认色。"""
-    from tui.files_view import _render_row
-    ignored = _render_row({"name": "notes.txt", "ignored": True},
-                          selected=False, name_col=20, btn_w=6,
-                          push_text="Push", ignore_text="Ignore")
-    active = _render_row({"name": "a.py", "ignored": False},
-                         selected=False, name_col=20, btn_w=6,
-                         push_text="Push", ignore_text="Ignore")
-    assert "[#58A6FF]Push[/]" in ignored
-    assert "[#58A6FF]" not in active
-
-
-def test_files_view_button_gap_two_spaces():
-    """文件名与操作按钮之间至少 2 空格分隔，避免视觉粘连。"""
-    from tui.files_view import _render_row
-    row = _render_row({"name": "notes.txt", "ignored": False},
-                      selected=False, name_col=9, btn_w=6,
-                      push_text="Push", ignore_text="Ignore")
-    # name_col=9 恰好占满文件名（notes.txt 宽 9），按钮前仍保留 2 空格
-    assert "notes.txt  Ignore" in row
-
-
-def test_pull_view_enter_restores_commit():
-    """拉取视图：选中历史提交后 Enter 直接恢复（无二次确认）。"""
-    svc = make_tui_services(initialized=True, remote="x")
-    svc.git.commits = ["abcdef1234567890", "fedcba9876543210"]
-    view = RestoreView(svc.restore, svc.git,
-                       key_source=scripted([KEY_DOWN, KEY_ENTER]),
-                       out=lambda s: None)
-    view.run()
-    assert svc.git.reset_to == "abcdef1234567890"  # 第二项（较旧提交）
-
-
-def test_pull_view_align_remote_on_first_item():
-    """拉取视图：光标默认首个（最新提交），Enter = 对齐远程（fetch + reset origin/branch）。"""
-    svc = make_tui_services(initialized=True, remote="x")
-    svc.git.commits = ["abcdef1234567890"]
-    view = RestoreView(svc.restore, svc.git,
-                       key_source=scripted([KEY_ENTER]),
-                       out=lambda s: None)
-    view.run()
-    assert svc.git.reset_to == "origin/main"
-    assert svc.git.fetch_calls == 1
-    assert svc.git.clean_calls == 1  # 1:1 复刻：对齐远程后清理未跟踪文件
-
-
-def test_pull_view_cursor_matches_menu_style():
-    """拉取视图光标与文件视图同款：› 前缀 + 底色框选，未选中行等宽占位对齐。
-
-    列表 = 历史提交（最新在前）；文本起始列均为 3（选中 ` › 文本 ` / 未选中 `   文本 `）。
-    """
-    svc = make_tui_services(initialized=True, remote="x")
-    svc.git.commits = ["abcdef1234567890", "fedcba9876543210"]
-    out_lines = []
-    view = RestoreView(svc.restore, svc.git,
-                       key_source=scripted([KEY_BACKSPACE]),
-                       out=out_lines.append)
-    view.run()
-    block = out_lines[0]  # DiffRenderer 首次整块输出
-    lines = block.splitlines()
-    assert len(lines) == 2
-    assert lines[0].index("fedcba98") == 3  # 最新在前，选中行 › 光标
-    assert lines[1].index("abcdef12") == 3  # 文本对齐
-
-
-def test_pull_view_no_commits_shows_hint():
-    """无历史提交时提示并返回（无对齐项兜底）。"""
-    svc = make_tui_services(initialized=True, remote="x")
-    svc.git.commits = []
-    out_lines = []
-    view = RestoreView(svc.restore, svc.git,
-                       key_source=scripted([]),
-                       out=out_lines.append)
-    view.run()
-    assert "No commits." in "\n".join(out_lines)
-
-
 def test_menu_sync_star_clears_after_push():
     """推送完成后状态变 CLEAN，菜单 `*` 同步标记消失（状态变化触发菜单重绘）。"""
-    svc = make_tui_services(initialized=True, remote="x", files={"a.py": "1"})
+    svc = make_services(initialized=True, remote="x", files={"a.py": "1"})
     out_lines = []
     app = InteractiveApp(svc, "fake_repo",
                          key_source=scripted([KEY_ENTER]),
@@ -367,6 +260,7 @@ def test_menu_sync_star_clears_after_push():
     with pytest.raises(StopIteration):
         app.run()
     assert svc.git.commits  # 确实推送了
+    assert app._views["push"]._push_result is True  # 结果锁定
     joined = "\n".join(out_lines)
     assert "[*Push*]" in joined  # 推送前菜单带 * 标记（CHANGED）
     menu_redraws = [ln for ln in out_lines
@@ -380,18 +274,16 @@ def test_menu_redraw_line_stable_after_remote_configured(tmp_path):
     """remote 从无到有后菜单重绘行号不漂移（顶栏布局固定），避免重行。
 
     复现：NO_REMOTE 启动（顶栏 7 行，菜单在第 5 行）→ Enter 推送配置 remote →
-    左右键移动光标触发多次菜单重绘 → 重绘行号不漂移。
+    左右键切换标签触发多次菜单重绘 → 重绘行号不漂移。
     """
-    import re
     (tmp_path / "a.py").write_text("x")
-    svc = make_tui_services(initialized=True, remote=None,
-                            files={"a.py": "1"})
+    svc = make_services(initialized=True, remote=None,
+                        files={"a.py": "1"})
     svc.file_ops.repo_path = str(tmp_path)
     out_lines = []
     app = InteractiveApp(svc, "fake_repo",
                          key_source=scripted([KEY_ENTER, KEY_RIGHT, KEY_LEFT,
-                                              KEY_RIGHT, KEY_LEFT,
-                                              KEY_BACKSPACE]),
+                                              KEY_RIGHT, KEY_LEFT]),
                          out=out_lines.append)
     with pytest.raises(StopIteration):
         app.run()
@@ -417,7 +309,7 @@ def test_content_truncation_keeps_header_on_screen(monkeypatch):
                         staticmethod(lambda: 24))
     monkeypatch.setattr(InteractiveApp, "_terminal_width",
                         staticmethod(lambda: 100))
-    svc = make_tui_services(initialized=True, remote="x")
+    svc = make_services(initialized=True, remote="x")
     out_lines = []
     app = InteractiveApp(svc, "fake_repo",
                          key_source=scripted([]),
@@ -436,36 +328,7 @@ def test_content_truncation_keeps_header_on_screen(monkeypatch):
                 f"内容超屏触发滚动: start={start_row} rows={n} out={ln!r}"
 
 
-# ── 菜单光标（← → + Enter）──
-def test_menu_cursor_initial_follows_recommended():
-    """BEHIND 时初始光标落在拉取，Enter 进入拉取视图，再 Enter 执行对齐远程。"""
-    svc = make_tui_services(initialized=True, remote="x", behind=1,
-                            commits=["abcdef1234567890"])
-    app = InteractiveApp(svc, "fake_repo",
-                         key_source=scripted([KEY_ENTER, KEY_ENTER]),
-                         out=lambda s: None)
-    with pytest.raises(StopIteration):
-        app.run()
-    assert svc.git.reset_to == "origin/main"  # 拉取视图首项对齐远程
-    assert svc.git.clean_calls == 1
-
-
-def test_menu_cursor_wraps_and_executes_selected():
-    """← → 循环移动光标；CLEAN 状态（推荐刷新→光标推送）右移 2 次、左移 1 次后
-    Enter 进拉取视图，再 Enter 执行对齐远程。"""
-    svc = make_tui_services(initialized=True, remote="x",
-                            commits=["abcdef1234567890"])
-    app = InteractiveApp(svc, "fake_repo",
-                         key_source=scripted(
-                             [KEY_RIGHT, KEY_RIGHT, KEY_LEFT, KEY_ENTER,
-                              KEY_ENTER]),
-                         out=lambda s: None)
-    with pytest.raises(StopIteration):
-        app.run()
-    assert svc.git.reset_to == "origin/main"  # 光标最终落在拉取，Enter 对齐远程
-    assert svc.git.clean_calls == 1
-
-
+# ── 菜单标签（← → 切换）──
 def test_menu_brackets_only_on_selected():
     """仅选中项带括号：剥离标签后无 active 时无任何 `[]`，有 active 时恰一项 [X]。
 
@@ -512,14 +375,43 @@ def test_menu_widths_selected_vs_unselected():
     assert len(positions) == 1, f"Push 位置漂移: {positions}"
 
 
-# ── 无回显化：文件视图失败标记 ──
-def test_file_ops_push_file_returns_bool():
-    """push_file 返回 bool：推送失败 False，成功 True。"""
-    svc = make_tui_services(initialized=True, remote="x")
-    svc.git.fail_mode = "network"  # 持久推送失败
-    assert svc.file_ops.push_file("a.py") is False
-    svc.git.fail_mode = "ok"
-    assert svc.file_ops.push_file("b.py") is True
+# ── 文件行渲染（_render_row 纯函数）──
+def test_files_view_ignored_name_strikethrough():
+    """已忽略文件文件名带删除线（默认色），未忽略文件不带（状态一眼可辨）。"""
+    from tui.files_view import _render_row
+    ignored = _render_row({"name": "notes.txt", "ignored": True},
+                          selected=False, name_col=20, btn_w=6,
+                          push_text="Push", ignore_text="Ignore")
+    active = _render_row({"name": "a.py", "ignored": False},
+                         selected=False, name_col=20, btn_w=6,
+                         push_text="Push", ignore_text="Ignore")
+    assert "[strike]notes.txt[/]" in ignored
+    assert "strike #292929" not in ignored  # 删除线为默认色，无自定义颜色
+    assert "[strike" not in active
+    assert "Push" in ignored and "Ignore" in active
+
+
+def test_files_view_push_button_blue():
+    """「推送」按钮蓝色（#58A6FF），「忽略」按钮保持默认色。"""
+    from tui.files_view import _render_row
+    ignored = _render_row({"name": "notes.txt", "ignored": True},
+                          selected=False, name_col=20, btn_w=6,
+                          push_text="Push", ignore_text="Ignore")
+    active = _render_row({"name": "a.py", "ignored": False},
+                         selected=False, name_col=20, btn_w=6,
+                         push_text="Push", ignore_text="Ignore")
+    assert "[#58A6FF]Push[/]" in ignored
+    assert "[#58A6FF]" not in active
+
+
+def test_files_view_button_gap_two_spaces():
+    """文件名与操作按钮之间至少 2 空格分隔，避免视觉粘连。"""
+    from tui.files_view import _render_row
+    row = _render_row({"name": "notes.txt", "ignored": False},
+                      selected=False, name_col=9, btn_w=6,
+                      push_text="Push", ignore_text="Ignore")
+    # name_col=9 恰好占满文件名（notes.txt 宽 9），按钮前仍保留 2 空格
+    assert "notes.txt  Ignore" in row
 
 
 def test_files_view_failed_marker_aligned():
@@ -540,68 +432,19 @@ def test_files_view_failed_marker_aligned():
     assert f.index("notes.txt") == o.index("a.py") == 3
 
 
-def test_files_view_shows_failed_marker_after_push_fail(tmp_path):
-    """push 失败后文件行出现 [!] 标记。"""
-    (tmp_path / "notes.txt").write_text("x")
-    svc = make_tui_services(initialized=True, remote="x")
-    svc.git.gitignore_lines = ["notes.txt"]
-    svc.git.fail_mode = "network"      # 推送失败
-    svc.file_ops.repo_path = str(tmp_path)
-    out_lines = []
-    view = FilesView(svc.file_ops, key_source=scripted([KEY_ENTER, KEY_BACKSPACE]),
-                     out=out_lines.append)
-    view.run()
-    joined = "\n".join(out_lines)
-    assert "[!]" in joined              # 失败标记出现
+# ── 无回显化：文件操作与推送状态机 ──
+def test_file_ops_push_file_returns_bool():
+    """push_file 返回 bool：推送失败 False，成功 True。"""
+    svc = make_services(initialized=True, remote="x")
+    svc.git.fail_mode = "network"  # 持久推送失败
+    assert svc.file_ops.push_file("a.py") is False
+    svc.git.fail_mode = "ok"
+    assert svc.file_ops.push_file("b.py") is True
 
 
-# ── 无回显化：拉取视图青色版本标注 ──
-def test_pull_view_marks_remote_head_cyan():
-    """本地与远程一致的提交 hash 用蓝色标注，其余不变色。
-
-    颜色验证走 _render_label 纯函数（测试环境无 tty，不产 ANSI 色码）；
-    集成断言 run() 正确记录远程一致版本且两行均渲染。
-    """
-    from tui.restore_view import RestoreView as RV
-    svc = make_tui_services(initialized=True, remote="x")
-    svc.git.commits = ["abcdef1234567890", "fedcba9876543210"]
-    svc.git.remote_head_hash = "fedcba9876543210"  # 远程指向较旧提交
-    out_lines = []
-    view = RestoreView(svc.restore, svc.git,
-                       key_source=scripted([KEY_BACKSPACE]),
-                       out=out_lines.append)
-    view.run()
-    assert view._remote_head == "fedcba9876543210"  # 视图记录了远程一致版本
-    block = out_lines[0]
-    assert "fedcba98" in block and "abcdef12" in block  # 两行均渲染
-    # markup 层：命中行 hash 包蓝色，其余不变色
-    rv = RV(svc.restore, svc.git)
-    rv._remote_head = "fedcba9876543210"
-    assert "[#3A96DD]fedcba98[/]" in rv._render_label(
-        "fedcba9876543210", "2026-01-01 00:00:00")
-    assert "[#3A96DD]" not in rv._render_label(
-        "abcdef1234567890", "2026-01-01 00:00:00")
-
-
-def test_pull_view_no_cyan_when_remote_head_absent():
-    """remote_head 为 None（无远程/未 fetch）或列表内不存在时无标注色。"""
-    from tui.restore_view import RestoreView as RV
-    svc = make_tui_services(initialized=True, remote="x")
-    svc.git.commits = ["abcdef1234567890"]
-    view = RV(svc.restore, svc.git)
-    view._remote_head = None
-    assert "[#3A96DD]" not in view._render_label("abcdef1234567890", "2026-01-01 00:00:00")
-    view._remote_head = "9999999999999999"  # 列表内不存在
-    assert "[#3A96DD]" not in view._render_label("abcdef1234567890", "2026-01-01 00:00:00")
-    view._remote_head = "abcdef1234567890"
-    assert "[#3A96DD]abcdef12[/]" in view._render_label("abcdef1234567890", "2026-01-01 00:00:00")
-
-
-# ── 无回显化：推送状态机 ──
 def test_push_marks_progress_then_done():
     """按 Enter 推送：文件标记先 [·] 后 [✓]，且无 ActionLog 回显。"""
-    import tui.interactive as ti
-    svc = make_tui_services(initialized=True, remote="x", files={"a.py": "1", "b.py": "2"})
+    svc = make_services(initialized=True, remote="x", files={"a.py": "1", "b.py": "2"})
     out_lines = []
     app = InteractiveApp(svc, "fake_repo",
                          key_source=scripted([KEY_ENTER]),
@@ -617,8 +460,7 @@ def test_push_marks_progress_then_done():
 
 def test_push_failure_marks_error_no_reason():
     """推送失败：所有文件 [✕]，不显示失败原因（完全无回显）。"""
-    import tui.interactive as ti
-    svc = make_tui_services(initialized=True, remote="x", files={"a.py": "1"})
+    svc = make_services(initialized=True, remote="x", files={"a.py": "1"})
     svc.git.fail_mode = "network"  # 持久推送失败 → SyncError
     out_lines = []
     app = InteractiveApp(svc, "fake_repo",
@@ -634,8 +476,7 @@ def test_push_failure_marks_error_no_reason():
 
 def test_push_no_changes_no_status_markers():
     """无待推文件（如仅初始化仓库）时不显示状态标记，仍正常执行。"""
-    import tui.interactive as ti
-    svc = make_tui_services(initialized=False, remote=None)
+    svc = make_services(initialized=False, remote=None)
     out_lines = []
     app = InteractiveApp(svc, "fake_repo",
                          key_source=scripted([KEY_ENTER]),
@@ -649,9 +490,8 @@ def test_push_no_changes_no_status_markers():
 
 def test_push_ahead_clean_tree_shows_placeholder():
     """AHEAD 且工作区干净（变更已提交未推送）：推送视图显示本地提交占位行而非空白。"""
-    import tui.interactive as ti
     # ahead=1 + 无 files → porcelain 为空 → 状态 AHEAD，工作区干净
-    svc = make_tui_services(initialized=True, remote="x", ahead=1)
+    svc = make_services(initialized=True, remote="x", ahead=1)
     out_lines = []
     app = InteractiveApp(svc, "fake_repo",
                          key_source=scripted([KEY_ENTER]),
@@ -664,42 +504,27 @@ def test_push_ahead_clean_tree_shows_placeholder():
     assert "1 local commit" in joined  # 占位行表达推送本地提交
 
 
-def test_push_result_persists_until_restart():
-    """推送完成后结果 [✓] 常驻：Backspace 不清除，重启（重开 app）才消失。"""
-    import tui.interactive as ti
-    svc = make_tui_services(initialized=True, remote="x", files={"a.py": "1"})
+def test_push_result_cleared_after_tab_switch():
+    """推送结果 [✓] 常驻于推送页；切出再切入后清除（重扫为干净清单）。"""
+    svc = make_services(initialized=True, remote="x", files={"a.py": "1"})
     out_lines = []
     app = InteractiveApp(svc, "fake_repo",
-                         key_source=scripted([KEY_ENTER, KEY_BACKSPACE]),
+                         key_source=scripted([KEY_ENTER, KEY_RIGHT, KEY_LEFT]),
                          out=out_lines.append)
     with pytest.raises(StopIteration):
         app.run()
-    assert app._push_result is True   # 结果仍锁定
-    assert "[✓]" in app._view         # 结果视图未消失（Backspace 无效）
+    assert app._views["push"]._push_result is False  # 切出已清锁定
+    assert "[✓]" not in app._view  # 切回推送页后重扫，结果视图已消失
 
 
 def test_push_result_cleared_on_empty_push():
-    """CLEAN 状态下再次按 Enter（无可推内容）：旧推送结果清除，交还主屏。"""
-    import tui.interactive as ti
-    svc = make_tui_services(initialized=True, remote="x", files={"a.py": "1"})
+    """推送结果锁定期间再次按 Enter（无可推内容）：旧结果清除，重扫为空。"""
+    svc = make_services(initialized=True, remote="x", files={"a.py": "1"})
     out_lines = []
     app = InteractiveApp(svc, "fake_repo",
                          key_source=scripted([KEY_ENTER, KEY_ENTER]),
                          out=out_lines.append)
     with pytest.raises(StopIteration):
         app.run()
-    assert app._push_result is False
-    assert not app._view or "[✓]" not in app._view
-
-
-def test_begin_push_renders_dot_before_fetch():
-    """[·] 在按下 Enter 后立即渲染：_begin_push 路径零 fetch，无网络等待。"""
-    svc = make_tui_services(initialized=True, remote="x", files={"a.py": "1"})
-    out_lines = []
-    app = InteractiveApp(svc, "fake_repo", key_source=scripted([]),
-                         out=out_lines.append)
-    app._info = svc.status.get_status(fetch=False)
-    app._begin_push()
-    assert svc.git.fetch_calls == 0          # [·] 渲染路径不触发 fetch
-    assert app._push_state == {"a.py": "·"}  # 全部标记上传中
-    assert "[·]" in app._view                # 视图立即显示
+    assert app._views["push"]._push_result is False
+    assert "[✓]" not in app._view
