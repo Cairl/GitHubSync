@@ -51,8 +51,8 @@ def test_menu_for_action_mapping():
 def test_render_main_contains_key_parts():
     out = _strip_markup(render_main(_info(RepoStatus.CHANGED, added=1, modified=2),
                                     "GitHubSync"))
-    # 第一行：项目名（无远程 URL 时不附括号）；第二行：分支·状态
-    assert out.startswith("GitHubSync\nbranch: main (+3)")
+    # 第一行：项目名（无远程 URL 时不附括号）；第二行：分支（无状态详情括号）
+    assert out.startswith("GitHubSync\nbranch: main\n")
     assert "file(s) changed" not in out
     assert "Push" in out and "Pull" in out and "Files" in out
     assert "›" not in out       # render_main 无 active 时不显示光标
@@ -70,17 +70,20 @@ def test_render_header_shows_remote_url():
     assert "Home: https://github.com/Cairl/GitHubSync" in out
 
 
-def test_render_main_diverged_wording():
+def test_render_main_diverged_no_bracket_detail():
+    """分叉时状态行同样只有分支名，无括号状态详情。"""
     out = _strip_markup(render_main(_info(RepoStatus.DIVERGED, ahead=1, behind=2),
                                     "GitHubSync"))
-    assert "new commits to push and pull" in out
+    assert out.startswith("GitHubSync\nbranch: main\n")
+    assert "new commits to push and pull" not in out
+    assert "(" not in out
 
 
 def test_render_main_status_branch_colored():
-    """状态行仅分支名染色（#CDD6F4），括号内容为默认色。"""
+    """状态行仅分支名染色（#CDD6F4），无括号内容。"""
     out = render_main(_info(RepoStatus.DIVERGED, ahead=1, behind=2), "GitHubSync")
     assert "[#CDD6F4]main" in out  # 分支名染色
-    assert "#F85149" not in out    # 括号内容不再染语义色
+    assert "#F85149" not in out    # 无括号状态详情
     out_clean = render_main(_info(RepoStatus.CLEAN), "GitHubSync")
     assert "#3FB950" not in out_clean
 
@@ -235,7 +238,7 @@ def test_interactive_enter_pushes():
     with pytest.raises(StopIteration):  # 无退出键，按键耗尽即止
         app.run()
     assert svc.git.commits  # 确实提交了
-    assert "(+1)" in "\n".join(out_lines)
+    assert "(+1)" not in "\n".join(out_lines)  # 状态行不再显示变化计数括号
 
 
 def test_interactive_invalid_key_no_repaint():
@@ -249,7 +252,7 @@ def test_interactive_invalid_key_no_repaint():
         app.run()
     joined = "\n".join(out_lines)
     # 主屏只渲染一次；后续两轮内容相同 → 零输出
-    assert joined.count("Synced, working tree clean.") == 1
+    assert joined.count("Project: fake_repo") == 1
 
 
 def test_menu_sync_star_clears_after_push():

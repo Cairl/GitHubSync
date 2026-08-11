@@ -1,6 +1,6 @@
 """交互模式渲染：纯函数，RepoInfo → markup 文本（语法见 core/ansi.py）。零 I/O、零子进程。
 
-顶栏布局：项目/分支·状态/主页 / 空行 / 菜单块（#292929 背景三行）/ 空行。
+顶栏布局：项目/分支/主页 / 空行 / 菜单块（#292929 背景三行）/ 空行。
 """
 from __future__ import annotations
 
@@ -38,26 +38,6 @@ def recommended_action(info: RepoInfo) -> tuple[str, str]:
     if info.status == RepoStatus.DIVERGED:
         return "diff", tr("查看差异", "Diff")
     return "refresh", tr("刷新", "Refresh")
-
-
-def _status_detail(info: RepoInfo) -> str:
-    """状态详情（括号内文案）；CHANGED 无变化时返回空串（隐藏括号）。"""
-    if info.status == RepoStatus.CHANGED:
-        # 顶栏仅显示变化文件总数，具体文件由内容区变更列表展示
-        return f"+{info.change_count}" if info.change_count else ""
-    if info.status == RepoStatus.AHEAD:
-        return tr("尚未提交完成", "not fully synced")
-    if info.status == RepoStatus.BEHIND:
-        return tr("有新的提交", "new commits to pull")
-    if info.status == RepoStatus.DIVERGED:
-        return tr("有新的提交和拉取", "new commits to push and pull")
-    if info.status == RepoStatus.CLEAN:
-        return tr("已同步，工作区干净。", "Synced, working tree clean.")
-    if info.status == RepoStatus.NO_REPO:
-        return tr("尚未初始化 git 仓库。", "Not a git repository yet.")
-    if info.status == RepoStatus.NO_REMOTE:
-        return tr("未配置远程仓库。", "No remote configured.")
-    return tr(f"状态检测失败: {info.error}", f"Status check failed: {info.error}")
 
 
 def _has_sync(info: RepoInfo, item_id: str) -> bool:
@@ -126,15 +106,13 @@ def _project_line(info: RepoInfo, project_name: str) -> str:
 
 
 def render_status_line(info: RepoInfo) -> str:
-    """状态段：「分支: main (状态)」。标签 #666666，分支名 #CDD6F4，括号内容默认色。"""
-    detail = _status_detail(info)
-    suffix = f" ({detail})" if detail else ""
+    """状态段：「分支: main」。标签 #666666，分支名 #CDD6F4（不再附括号状态详情）。"""
     return (f"[{COLOR_LABEL}]{tr('分支: ', 'branch: ')}[/]"
-            f"[{COLOR_BRANCH_NAME}]{info.branch}[/]{suffix}")
+            f"[{COLOR_BRANCH_NAME}]{info.branch}[/]")
 
 
 def _top_line(info: RepoInfo, project_name: str) -> str:
-    """顶栏信息区三行（行首统一缩进 2 空格）：项目: 名 / 分支: main (+N) / 主页: URL。"""
+    """顶栏信息区三行（行首统一缩进 2 空格）：项目: 名 / 分支: main / 主页: URL。"""
     lines = [f"  [{COLOR_LABEL}]{tr('项目: ', 'Project: ')}[/]{project_name}",
              f"  {render_status_line(info)}"]
     if info.remote_url:
@@ -173,7 +151,7 @@ def render_main(info: RepoInfo, project_name: str,
 
 def render_header(info: RepoInfo, project_name: str, width: int = 80,
                   active: str | None = None) -> str:
-    """顶部常驻栏：项目 / 分支·状态 / 主页 / 空行 / 菜单块 / 空行。
+    """顶部常驻栏：项目 / 分支 / 主页 / 空行 / 菜单块 / 空行。
 
     固定在屏幕顶部；内容区（变更列表、日志、各视图）在其下方刷新。
     """
