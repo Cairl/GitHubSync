@@ -36,3 +36,98 @@ def test_activate_loads_once_then_cache_hits():
     v.invalidate()
     v.activate()
     assert v.loads == 2          # 失效后重扫
+
+
+# ── PushView ──
+from core.config import KEY_DOWN, KEY_ENTER, KEY_UP
+from tui.push_view import PushView
+
+
+def _make_push_view(**git_kw):
+    """PushView + 测试线束：get_info 用构造时 status，paint/refresh 记录调用。"""
+    svc = make_services(**git_kw)
+    painted: list[str] = []
+    info = svc.status.get_status(fetch=False)
+
+    def refresh(fetch: bool):
+        return svc.status.get_status(fetch=fetch)
+
+    view = PushView(svc.sync, svc.git, get_info=lambda: info,
+                    refresh_status=refresh, paint=painted.append)
+    return svc, view, painted
+
+
+def test_push_view_activate_scans_once():
+    svc, view, _ = _make_push_view(initialized=True, remote="x",
+                                   files={"a.py": "1"})
+    base = svc.git.porcelain_calls  # 线束构造时 get_status 已计一次
+    view.activate()
+    view.activate()
+    assert svc.git.porcelain_calls == base + 1  # 懒加载：二次切入零扫描
+    assert "[~] a.py" in view.render()
+    view.invalidate()
+    view.activate()
+    assert svc.git.porcelain_calls == base + 2  # 失效后重扫
+
+
+def test_push_view_enter_marks_progress_then_done():
+    svc, view, painted = _make_push_view(initialized=True, remote="x",
+                                         files={"a.py": "1", "b.py": "2"})
+    view.activate()
+    stale = view.handle_key(KEY_ENTER)
+    assert stale == ["pull"]                # 提交历史已变
+    assert svc.git.commits                  # 确实提交
+    assert svc.git.fetch_calls == 1         # fetch 在 [·] 渲染之后恰好一次
+    assert "[·]" in painted[0]              # 先渲染上传中
+    assert "[✓]" in painted[-1]             # 最终完成标记
+    assert view._push_result is True        # 结果锁定
+
+
+def test_push_view_result_lock_blocks_rescan_until_deactivate():
+    svc, view, _ = _make_push_view(initialized=True, remote="x",
+                                   files={"a.py": "1"})
+    view.activate()
+    view.handle_key(KEY_ENTER)
+    calls = svc.git.porcelain_calls
+    view.activate()                         # 锁定期间不重扫
+    assert svc.git.porcelain_calls == calls
+    assert "[✓]" in view.render()           # 结果常驻
+    view.deactivate()                       # 切出清除锁定
+    view.activate()
+    assert svc.git.porcelain_calls > calls  # 切入重扫
+    assert "[✓]" not in view.render()
+
+
+def test_push_view_empty_enter_with_result_clears():
+    """结果锁定期间再按 Enter（无可推内容）：清结果，返回 ["push"]，不再 sync。"""
+    svc, view, _ = _make_push_view(initialized=True, remote="x",
+                                   files={"a.py": "1"})
+    view.activate()
+    view.handle_key(KEY_ENTER)              # 推送，锁定
+    stale = view.handle_key(KEY_ENTER)      # 工作区已干净 → 空推送
+    assert stale == ["push"]
+    assert view._push_result is False
+
+
+def test_push_view_no_changes_still_syncs():
+    """无结果锁定 + 无可推内容（如未初始化仓库）：Enter 仍执行 sync（建仓库等）。"""
+    svc, view, _ = _make_push_view(initialized=False, remote=None)
+    view.activate()
+    view.handle_key(KEY_ENTER)
+    assert svc.git.initialized
+
+
+def test_push_view_ahead_placeholder():
+    svc, view, painted = _make_push_view(initialized=True, remote="x", ahead=1)
+    view.activate()
+    view.handle_key(KEY_ENTER)
+    assert "1 local commit" in painted[0]
+
+
+def test_push_view_failure_marks_error():
+    svc, view, painted = _make_push_view(initialized=True, remote="x",
+                                         files={"a.py": "1"})
+    svc.git.fail_mode = "network"
+    view.activate()
+    view.handle_key(KEY_ENTER)
+    assert "[✕]" in painted[-1]
