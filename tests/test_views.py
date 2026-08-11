@@ -131,3 +131,84 @@ def test_push_view_failure_marks_error():
     view.activate()
     view.handle_key(KEY_ENTER)
     assert "[✕]" in painted[-1]
+
+
+# ── PullView ──
+from tui.pull_view import PullView
+
+
+def _make_pull_view(**git_kw):
+    svc = make_services(**git_kw)
+    view = PullView(svc.restore, svc.git, max_rows=lambda: 20)
+    return svc, view
+
+
+def test_pull_view_activate_loads_once():
+    svc, view = _make_pull_view(initialized=True, remote="x",
+                                commits=["abcdef1234567890"])
+    view.activate()
+    view.activate()
+    assert svc.git.recent_commits_calls == 1  # 懒加载缓存
+    assert "abcdef12" in view.render()
+
+
+def test_pull_view_cursor_moves_and_wraps():
+    svc, view = _make_pull_view(initialized=True, remote="x",
+                                commits=["abcdef1234567890", "fedcba9876543210"])
+    view.activate()
+    assert view.handle_key(KEY_UP) == []      # 光标移动不产生失效
+    assert view._index == 1                   # 上移回卷到末项
+    view.handle_key(KEY_DOWN)
+    assert view._index == 0
+
+
+def test_pull_view_enter_first_aligns_remote():
+    svc, view = _make_pull_view(initialized=True, remote="x",
+                                commits=["abcdef1234567890"])
+    view.activate()
+    stale = view.handle_key(KEY_ENTER)
+    assert stale == ["pull", "push"]          # 工作区与历史都变了
+    assert svc.git.reset_to == "origin/main"
+    assert svc.git.fetch_calls == 1
+    assert svc.git.clean_calls == 1
+
+
+def test_pull_view_enter_restores_commit():
+    svc, view = _make_pull_view(initialized=True, remote="x",
+                                commits=["abcdef1234567890", "fedcba9876543210"])
+    view.activate()
+    view.handle_key(KEY_DOWN)
+    view.handle_key(KEY_ENTER)
+    assert svc.git.reset_to == "abcdef1234567890"
+
+
+def test_pull_view_no_commits():
+    svc, view = _make_pull_view(initialized=True, remote="x", commits=[])
+    view.activate()
+    assert view.render() == "No commits."
+    assert view.handle_key(KEY_ENTER) == []   # 空列表键全 no-op
+
+
+def test_pull_view_remote_head_marked():
+    """远程一致版本 hash 包 #ABDFA7（同 [✓]），其余不变色。"""
+    svc, view = _make_pull_view(initialized=True, remote="x",
+                                commits=["abcdef1234567890", "fedcba9876543210"])
+    svc.git.remote_head_hash = "fedcba9876543210"
+    view.activate()
+    assert view._remote_head == "fedcba9876543210"
+    assert "[#ABDFA7]fedcba98[/]" in view._render_label(
+        "fedcba9876543210", "2026-01-01 00:00:00")
+    assert "[#ABDFA7]" not in view._render_label(
+        "abcdef1234567890", "2026-01-01 00:00:00")
+
+
+def test_pull_view_cursor_style_aligned():
+    """选中行 › + 底色框选（不加粗），未选中行 3 空格占位，文本起始列均为 3。"""
+    svc, view = _make_pull_view(initialized=True, remote="x",
+                                commits=["abcdef1234567890", "fedcba9876543210"])
+    view.activate()
+    lines = view.render().splitlines()
+    assert len(lines) == 2
+    assert lines[0].index("fedcba98") == 3    # 最新在前，选中
+    assert lines[1].index("abcdef12") == 3
+    assert "[on #636363]" not in lines[0]     # render 已转 ANSI（非 tty 纯文本）
