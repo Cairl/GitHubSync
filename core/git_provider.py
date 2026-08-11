@@ -194,7 +194,10 @@ class GitCLIProvider:
         return len([line for line in out.splitlines() if line.strip()])
 
     def get_porcelain(self) -> str:
-        ok, out = run_command(["git", "status", "--porcelain"], cwd=self.cwd)
+        # -c core.quotepath=false：非 ASCII 路径原样 UTF-8 输出，避免
+        # 默认 quotepath 八进制转义（"\\ooo"）导致中文文件名乱码/推送路径错误
+        ok, out = run_command(["git", "-c", "core.quotepath=false",
+                               "status", "--porcelain"], cwd=self.cwd)
         return out if ok else ""
 
     def get_recent_commits(self, limit: int = 20) -> list[dict]:

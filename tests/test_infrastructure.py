@@ -68,6 +68,30 @@ def test_timeout_error_is_sync_error():
     assert issubclass(CommandTimeoutError, SyncError)
 
 
+# ── git 子进程适配器 ──
+def test_get_porcelain_disables_quotepath(monkeypatch):
+    """中文文件名必须原样输出：get_porcelain 须带 -c core.quotepath=false。
+
+    回归：默认 core.quotepath=true 时 git 把非 ASCII 路径转义成
+    \\ooo 八进制（如 "01.\\343\\200\\212..."），format_diff 与
+    _collect_updated_items 只剥引号不反解，中文文件名显示乱码、
+    推送收集顶层路径出错。
+    """
+    import core.git_provider as gp
+
+    captured: dict = {}
+
+    def fake_run(command, cwd=None, timeout=None):
+        captured["cmd"] = command
+        return True, ""
+
+    monkeypatch.setattr(gp, "run_command", fake_run)
+    provider = gp.GitCLIProvider(".")
+    provider.get_porcelain()
+    assert captured["cmd"] == ["git", "-c", "core.quotepath=false",
+                               "status", "--porcelain"]
+
+
 def test_run_command_success():
     ok, out = run_command([sys.executable, "-c", "print('hello')"])
     assert ok is True
