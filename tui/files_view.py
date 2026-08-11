@@ -1,25 +1,19 @@
-"""文件级展开视图：变化/忽略文件列表，回车切换 include/exclude。
+"""文件标签页：变化/忽略文件列表，Enter 切换 include/exclude。
 
-每行文件名后跟一个独立列的操作按钮（垂直对齐）：已忽略文件显示「推送」
-（Enter 重新纳入同步），未忽略文件显示「忽略」（Enter 排除同步），
-同一按钮的两个状态，Enter 行为与按钮文案一一对应；已忽略文件文件名
-加删除线（[strike]）标记。
-
-两种渲染模式：
-- render_body 提供（InteractiveApp 整屏重绘）：列表渲染进内容区视图块；
-- 缺省：独立 DiffRenderer 块刷新（兼容独立使用与测试）。
+切入即显示（activate 首次 refresh_file_list，懒加载缓存）；↑/↓ 移动选中，
+Enter 切换推送/忽略后返回 ["files"] 由主循环失效重扫（等价旧 dirty 逻辑）。
+失败文件行首红色 [!]（_failed 集合跨重扫保留，invalidate 不清）。
 """
 from __future__ import annotations
 
-from typing import Callable
-
 from core.config import (COLOR_BRANCH, COLOR_ERROR, COLOR_MENU_ACTIVE_BG,
-                         KEY_BACKSPACE, KEY_DOWN, KEY_ENTER, KEY_ESC, KEY_UP)
+                         COLOR_MENU_ACTIVE_FG, KEY_DOWN, KEY_ENTER, KEY_UP)
 from core.file_ops_service import FileOpsService
 from core.i18n import tr
-from core.utils import get_display_width, get_key
+from core.utils import get_display_width
 
-from .renderer import DiffRenderer, markup_to_ansi
+from .renderer import markup_to_ansi
+from .view_base import ViewBase
 
 
 def _escape_markup(name: str) -> str:
@@ -77,82 +71,63 @@ def _render_row(item: dict, selected: bool, name_col: int, btn_w: int,
     head = f"[{COLOR_ERROR}]\\[!][/]" if failed else (" › " if selected else "   ")
     if selected:
         # 与导航栏光标同款：› 箭头 + #636363 底色框选（左右各冗余 1 格）
-        return (f"[bold on {COLOR_MENU_ACTIVE_BG}]"
+        return (f"[bold {COLOR_MENU_ACTIVE_FG} on {COLOR_MENU_ACTIVE_BG}]"
                 f"{head}{name}{gap}{btn}{' ' * btn_pad} [/]")
     return f"{head}{name}{gap}{btn}{' ' * btn_pad} "
 
 
-class FilesView:
-    """主循环内按 [f] 进入的文件视图；Backspace/Esc 返回主屏。块级差异刷新。"""
+class FilesView(ViewBase):
+    """文件标签页：无循环组件，键处理经 handle_key，渲染经 render。"""
 
-    def __init__(self, file_ops: FileOpsService,
-                 key_source: Callable[[], bytes] = get_key,
-                 out: Callable[[str], None] = print,
-                 render_body: Callable[[str | None], None] | None = None):
+    id = "files"
+
+    def __init__(self, file_ops: FileOpsService):
+        super().__init__()
         self.file_ops = file_ops
-        self._key = key_source
-        self._out = out
-        self._render_body = render_body
+        self._items: list[dict] = []
+        self._index = 0
         self._failed: set[str] = set()  # 操作失败的文件名集合（行首 [!]）
 
-    def run(self) -> None:
-        block = DiffRenderer(self._out) if self._render_body is None else None
-        index = 0
-        dirty = True  # 是否需要重新扫描（进入时 / Enter 切换后）
-        while True:
-            if dirty:
-                items = [i for i in self.file_ops.refresh_file_list()
-                         if i["action_text"]]
-                if not items:
-                    if self._render_body is not None:
-                        self._render_body(tr("没有文件。", "No files."))
-                        self._render_body(None)  # 交还主循环重新生成主屏视图
-                    else:
-                        self._out(tr("\n没有文件。\n", "\nNo files.\n"))
-                    return
-                index = max(0, min(index, len(items) - 1))
-                dirty = False
-            lines: list[str] = []
-            # 按钮列：已忽略 → 「推送」（Enter 纳入同步），未忽略 → 「忽略」（Enter 排除同步）
-            push_text = tr("推送", "Push")
-            ignore_text = tr("忽略", "Ignore")
-            btn_w = max(get_display_width(push_text),
-                        get_display_width(ignore_text))
-            name_col = min(max(get_display_width(i["name"])
-                               for i in items), _NAME_COL_MAX)
-            for i, item in enumerate(items):
-                markup = _render_row(item, i == index, name_col, btn_w,
-                                     push_text, ignore_text,
-                                     failed=item["name"] in self._failed)
-                lines.append(markup_to_ansi(markup))
-            text = "\n".join(lines)
-            if self._render_body is not None:
-                self._render_body(text)
+    def _load(self) -> None:
+        """重新扫描文件列表（仅保留有操作按钮的项）；光标按长度钳位保留。"""
+        self._items = [i for i in self.file_ops.refresh_file_list()
+                       if i["action_text"]]
+        self._index = max(0, min(self._index, len(self._items) - 1))
+
+    def render(self) -> str:
+        if not self._items:
+            return markup_to_ansi(tr("没有文件。", "No files."))
+        # 按钮列：已忽略 → 「推送」（Enter 纳入同步），未忽略 → 「忽略」（Enter 排除）
+        push_text = tr("推送", "Push")
+        ignore_text = tr("忽略", "Ignore")
+        btn_w = max(get_display_width(push_text),
+                    get_display_width(ignore_text))
+        name_col = min(max(get_display_width(i["name"])
+                           for i in self._items), _NAME_COL_MAX)
+        lines: list[str] = []
+        for i, item in enumerate(self._items):
+            markup = _render_row(item, i == self._index, name_col, btn_w,
+                                 push_text, ignore_text,
+                                 failed=item["name"] in self._failed)
+            lines.append(markup_to_ansi(markup))
+        return "\n".join(lines)
+
+    def handle_key(self, key: bytes) -> list[str]:
+        if not self._items:
+            return []
+        if key == KEY_UP:
+            self._index = (self._index - 1) % len(self._items)
+        elif key == KEY_DOWN:
+            self._index = (self._index + 1) % len(self._items)
+        elif key == KEY_ENTER:
+            item = self._items[self._index]
+            if item["ignored"]:
+                ok = self.file_ops.push_file(item["name"])
             else:
-                block.render(text)
-            key = self._key()
-            lower = key.lower() if isinstance(key, bytes) else key
-            if key == KEY_BACKSPACE or key == KEY_ESC:
-                if self._render_body is not None:
-                    self._render_body(None)  # 交还主循环重新生成主屏视图
-                else:
-                    block.clear()
-                return
-            if key == KEY_UP:
-                index = (index - 1) % len(items)
-            elif key == KEY_DOWN:
-                index = (index + 1) % len(items)
-            elif key == KEY_ENTER:
-                if self._render_body is None:
-                    # 先清块：切换产生的 ActionLog 在下方自然滚动
-                    block.clear()
-                item = items[index]
-                if item["ignored"]:
-                    ok = self.file_ops.push_file(item["name"])
-                else:
-                    ok = self.file_ops.remove_file(item["name"])
-                if ok:
-                    self._failed.discard(item["name"])
-                else:
-                    self._failed.add(item["name"])
-                dirty = True  # 列表已变化，下一轮重新扫描
+                ok = self.file_ops.remove_file(item["name"])
+            if ok:
+                self._failed.discard(item["name"])
+            else:
+                self._failed.add(item["name"])
+            return ["files"]  # 列表已变化，主循环失效重扫
+        return []

@@ -212,3 +212,64 @@ def test_pull_view_cursor_style_aligned():
     assert lines[0].index("fedcba98") == 3    # 最新在前，选中
     assert lines[1].index("abcdef12") == 3
     assert "[on #636363]" not in lines[0]     # render 已转 ANSI（非 tty 纯文本）
+
+
+# ── FilesView ──
+from tui.files_view import FilesView
+
+
+def _make_files_view(tmp_path, files=(), ignored=()):
+    """files: 工作区文件名；ignored: gitignore 条目。返回 (svc, view)。"""
+    for name in files:
+        (tmp_path / name).write_text("x")
+    svc = make_services(initialized=True, remote="x")
+    svc.git.gitignore_lines = list(ignored)
+    svc.file_ops.repo_path = str(tmp_path)
+    return svc, FilesView(svc.file_ops)
+
+
+def test_files_view_enter_toggles_and_invalidates(tmp_path):
+    """Enter 对未忽略文件执行排除（加入 gitignore），返回 ["files"] 触发重扫。"""
+    svc, view = _make_files_view(tmp_path, files=["a.py"])
+    view.activate()
+    stale = view.handle_key(KEY_ENTER)
+    assert stale == ["files"]
+    assert "a.py" in svc.git.gitignore_lines
+
+
+def test_files_view_include_ignored(tmp_path):
+    svc, view = _make_files_view(tmp_path, files=["notes.txt"],
+                                 ignored=["notes.txt"])
+    view.activate()
+    view.handle_key(KEY_ENTER)      # 已忽略 → 推送（重新纳入同步）
+    assert "notes.txt" not in svc.git.gitignore_lines
+
+
+def test_files_view_failed_marker(tmp_path):
+    """push 失败后 _failed 记录文件名，重扫后行首 [!]（invalidate 不清 _failed）。"""
+    svc, view = _make_files_view(tmp_path, files=["notes.txt"],
+                                 ignored=["notes.txt"])
+    svc.git.fail_mode = "network"
+    view.activate()
+    view.handle_key(KEY_ENTER)
+    assert "notes.txt" in view._failed
+    view.invalidate()
+    view.activate()                  # 动作后失效重扫（主循环语义）
+    assert "[!]" in view.render()
+
+
+def test_files_view_empty_shows_hint(tmp_path):
+    svc, view = _make_files_view(tmp_path)
+    view.activate()
+    assert view.render() == "No files."
+    assert view.handle_key(KEY_ENTER) == []
+
+
+def test_files_view_cursor_aligned(tmp_path):
+    """选中行 › 前缀 + 底色框选，未选中行 3 空格占位，文本起始列均为 3。"""
+    svc, view = _make_files_view(tmp_path, files=["a.py", "b.py"])
+    view.activate()
+    lines = view.render().splitlines()
+    assert len(lines) == 2
+    assert lines[0].index("a.py") == 3
+    assert lines[1].index("b.py") == 3
