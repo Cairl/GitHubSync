@@ -1,4 +1,7 @@
 @echo off
-rem GitHubSync å¯åŠ¨å™¨ï¼šåˆ‡æ¢åˆ°è„šæœ¬æ‰€åœ¨ç›®å½•å¹¶å¯åŠ¨äº¤äº’æ¨¡å¼ï¼ˆåŒæ­¥è¯¥ç›®å½•ï¼‰ã€‚
-rem å†…éƒ¨ä½¿ç”¨ PowerShell å®šä½ç›®å½•å¹¶è°ƒç”¨å½“å‰å…¥å£ main.pyï¼ˆv3.0+ï¼Œæ›¿ä»£æ—§ python -m srcï¼‰ã€‚
-powershell -NoProfile -Command "Set-Location $args[0]; python -m main" -args "%~dp0"
+rem GitHubSync Æô¶¯Æ÷£ºÇĞ»»µ½½Å±¾ËùÔÚÄ¿Â¼²¢Æô¶¯½»»¥Ä£Ê½£¨Í¬²½¸ÃÄ¿Â¼£©¡£
+rem ÄÚ²¿Ê¹ÓÃ PowerShell ¶¨Î»Ä¿Â¼²¢µ÷ÓÃµ±Ç°Èë¿Ú main.py£¨v3.0+£¬Ìæ´ú¾É python -m src£©¡£
+rem Ä¿Â¼¾­»·¾³±äÁ¿ÖĞ×ª£¬¹æ±Ü -Command ×Ö·û´®Ä£Ê½ $args ÎŞĞ§ÓëÎ²²¿·´Ğ±¸Ü×ªÒåÎÊÌâ¡£
+set "GITHUBSYNC_DIR=%~dp0"
+powershell -NoProfile -Command "Set-Location $env:GITHUBSYNC_DIR; if (Get-Command python -ErrorAction SilentlyContinue) { python -m main } else { py -m main }; exit $LASTEXITCODE"
+exit /b %errorlevel%
