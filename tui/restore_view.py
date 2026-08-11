@@ -83,9 +83,9 @@ class RestoreView:
             for i, (h, t) in enumerate(window):
                 label = self._render_label(h, t)
                 if start + i == index:
-                    # 与导航栏/文件视图光标同款：› 箭头 + #636363 底色框选
+                    # 与导航栏/文件视图光标同款：› 箭头 + #636363 底色框选（不加粗）
                     lines.append(markup_to_ansi(
-                        f"[bold on {COLOR_MENU_ACTIVE_BG}] › {label} [/]"))
+                        f"[on {COLOR_MENU_ACTIVE_BG}] › {label} [/]"))
                 else:
                     # 统一经 markup_to_ansi：青色命中行在未选中时也能正确着色
                     lines.append(markup_to_ansi(f"   {label} "))

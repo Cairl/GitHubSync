@@ -163,7 +163,7 @@ python -m main
 
 ### 无回显化（同步操作结果由视图状态表达）
 - 推送：`InteractiveApp._push` 状态机——按 Enter 后 `_push_state` 接管视图，所有待推文件标记 `[·]`（灰，上传中）→ 成功 `[✓]`（绿）/ 失败 `[✕]`（红），停留 1 秒后交还主循环；git 仍为一次 commit + push
-- 拉取：`RestoreView` 通过 `GitProvider.remote_head()` 取远程跟踪引用，本地与远程一致的提交 hash 标青色 `COLOR_CYAN`（#39C5CF），其余不变色
+- 拉取：`RestoreView` 通过 `GitProvider.remote_head()` 取远程跟踪引用，本地与远程一致的提交 hash 标蓝色 `COLOR_CYAN`（#3A96DD），其余不变色
 - 文件视图：`FileOpsService.push_file/remove_file` 返回 bool，失败文件行首 `[!]`（红），按钮状态切换即成功指示
 - 失败原因完全无回显：`[✕]`/`[!]` 即全部反馈（排查用 CLI `status`）
 
