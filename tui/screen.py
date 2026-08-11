@@ -70,16 +70,19 @@ def _has_sync(info: RepoInfo, item_id: str) -> bool:
     return False
 
 
+# 菜单槽位等宽：内容最大宽 = 括号 2 + `*` 同步标记 2 + 最长文本 5（Files）
+_MENU_SLOT = 12
+
+
 def render_menu(info: RepoInfo, active: str | None = None) -> str:
     """菜单行（纯文本 markup，背景由 _menu_block 统一添加）。
 
     导航栏固定三项：推送 / 拉取 / 文件（任何状态下一致），用 ← → 移动光标、
     Enter 执行选中项。active: 当前光标选中的菜单项 id（push/pull/files）。
-    括号恒占位（每项固定 [文本] 布局），未选中时括号隐形（与菜单底色同色），
-    选中时括号可见 + 底色 #636363——文本位置 / 项宽 / 空隙在所有状态与
-    光标位置下恒定，框选不引起抖动。推送/拉取有待处理同步时文本两侧加 `*`
-    （如 `[*推送*]`），pad 只补偿 `*` 的宽度（选中与否 pad 相同）。
-    选中项底色覆盖 ` [文本] `（左右各冗余 1 格，不顶格）。
+    三项等宽：每项独占 _MENU_SLOT 列槽位，内容（含括号与 `*` 标记）在槽内居中，
+    选中项括号（如 `[推送]`）+ 底色 #636363 铺满整个槽位，未选中项为裸文本。
+    槽位宽度与选中/同步标记无关——框选左右移动、`*` 增减都只改槽内留白，
+    其他选项位置零偏移，行总宽恒为 3 * _MENU_SLOT。
     方括号经反斜杠转义，星号为字面字符（markup 语法无 `*` 斜体简写，无需转义）。
     """
     parts = []
@@ -87,19 +90,21 @@ def render_menu(info: RepoInfo, active: str | None = None) -> str:
         synced = _has_sync(info, item_id)
         selected = active == item_id
         star = "*" if synced else ""
-        # pad 只补偿 * 宽度（5 - 2*有同步），与是否选中无关 → 等宽且框选不抖
-        pad = 5 - (2 if synced else 0)
+        label = f"{star}{text}{star}"
         if selected:
-            # 可见括号 + 底色框选
-            bracketed = "\\[" + star + text + star + "]"
-            parts.append(f"[bold on {COLOR_MENU_ACTIVE_BG}] {bracketed} [/]"
-                         f"{' ' * (pad - 1)}")
+            # 可见括号 + 底色铺满槽位
+            inner = "\\[" + label + "]"
+            inner_w = get_display_width(label) + 2
         else:
-            # 括号隐形（与菜单底色同色），占位固定，不推挤文本
-            # ] 为字面字符无需转义（解析器只认 [ 开头标签）
-            bracketed = (f"[{COLOR_MENU_BG}]\\[[/]{star}{text}{star}"
-                         f"[{COLOR_MENU_BG}]][/]")
-            parts.append(f" {bracketed}{' ' * pad}")
+            # 裸文本：无括号（仅选中项有括号），无隐形占位
+            inner = label
+            inner_w = get_display_width(label)
+        left = (_MENU_SLOT - inner_w) // 2
+        right = _MENU_SLOT - inner_w - left
+        slot = f"{' ' * left}{inner}{' ' * right}"
+        if selected:
+            slot = f"[bold on {COLOR_MENU_ACTIVE_BG}]{slot}[/]"
+        parts.append(slot)
     return "".join(parts)
 
 

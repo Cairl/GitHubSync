@@ -94,13 +94,17 @@ def test_render_menu_uniform_three_items():
 
 
 def test_render_menu_cursor_marks_active():
-    """选中项括号可见 + 底色，未选中项括号隐形（与菜单底色同色）：文本位置恒定不抖动。"""
+    """仅选中项带可见括号 + 底色铺满槽位，未选中项裸文本（无隐形括号）。"""
     menu = render_menu(_info(RepoStatus.CLEAN), active="push")
-    assert "[bold on #636363] \\[Push] [/]" in menu
-    assert "[#292929]\\[[/]Pull" in menu and "[#292929]\\[[/]Files" in menu
+    assert "[bold on #636363]   \\[Push]   [/]" in menu
+    assert "[#292929]" not in menu  # 无隐形括号
+    sel = _strip_markup(menu)
+    assert "[Push]" in sel and "[Pull]" not in sel and "[Files]" not in sel
     menu_right = render_menu(_info(RepoStatus.CLEAN), active="files")
-    assert "[bold on #636363] \\[Files] [/]" in menu_right
-    assert "[#292929]\\[[/]Push" in menu_right
+    assert "[bold on #636363]  \\[Files]   [/]" in menu_right
+    assert "[#292929]" not in menu_right
+    sel_right = _strip_markup(menu_right)
+    assert "[Files]" in sel_right and "[Push]" not in sel_right
 
 
 def test_render_menu_sync_marks():
@@ -108,7 +112,7 @@ def test_render_menu_sync_marks():
     menu = render_menu(_info(RepoStatus.CHANGED, modified=1))
     assert "*Push*" in menu and "Pull" in menu
     assert "Files" in menu
-    assert "\\[Push]" not in menu  # 无 active 时括号隐形（#292929），无可见 [Push]
+    assert "\\[Push]" not in menu  # 无 active 时全部裸文本，无任何括号
     menu_behind = render_menu(_info(RepoStatus.BEHIND, behind=1))
     assert "Push" in menu_behind and "*Pull*" in menu_behind
     menu_div = render_menu(_info(RepoStatus.DIVERGED, ahead=1, behind=1))
@@ -116,7 +120,7 @@ def test_render_menu_sync_marks():
     menu_clean = render_menu(_info(RepoStatus.CLEAN))
     assert "Push" in menu_clean and "Pull" in menu_clean
     assert "*" not in menu_clean  # 干净状态无任何同步标记
-    # 选中项可见文本（剥 markup）为 [*Push*] / [Push]，未选中隐形括号占位相同
+    # 选中项可见文本（剥 markup）为 [*Push*] / [Push]，未选中项为裸文本
     sel = _strip_markup(render_menu(_info(RepoStatus.CHANGED, modified=1),
                                     active="push"))
     assert "[*Push*]" in sel
@@ -462,36 +466,50 @@ def test_menu_cursor_wraps_and_executes_selected():
     assert svc.git.clean_calls == 1
 
 
-def test_menu_positions_fixed_across_cursor_and_sync():
-    """括号恒占位（未选中隐形）：光标移动（框选切换）不引起任何文本位置变化，零抖动。
+def test_menu_brackets_only_on_selected():
+    """仅选中项带括号：剥离标签后无 active 时无任何 `[]`，有 active 时恰一项 [X]。
 
-    剥掉颜色标签后，同一状态下任意光标位置的菜单行逐字符相同；
-    `*` 同步标记只影响自身项（Push 右移 1 列），其他项位置恒定。
+    `*` 同步标记由 pad 补偿宽度，不影响括号规则（选中项仍恰一个括号对）。
     """
     for st, kw in [(RepoStatus.CLEAN, {}),
                    (RepoStatus.CHANGED, {"modified": 1}),
                    (RepoStatus.DIVERGED, {"ahead": 1, "behind": 1})]:
-        base = _strip_markup(render_menu(_info(st, **kw)))  # active=None
+        base = _strip_markup(render_menu(_info(st, **kw)))  # active=None 全未选中
+        assert "[" not in base and "]" not in base, f"{st.name}: {base!r}"
         for active in ("push", "pull", "files"):
             t = _strip_markup(render_menu(_info(st, **kw), active=active))
-            assert t == base, f"{st.name} active={active}: {t!r}"
-    clean = _strip_markup(render_menu(_info(RepoStatus.CLEAN)))
-    changed = _strip_markup(render_menu(_info(RepoStatus.CHANGED, modified=1)))
-    diverged = _strip_markup(render_menu(_info(RepoStatus.DIVERGED, ahead=1, behind=1)))
-    assert changed.index("Files") == clean.index("Files") == diverged.index("Files")
-    assert changed.index("Push") == clean.index("Push") + 1  # * 前缀占 1 列
-    assert changed.index("Pull") == clean.index("Pull")  # CHANGED 的 Pull 无 *
-    assert diverged.index("Push") == clean.index("Push") + 1
-    assert diverged.index("Pull") == clean.index("Pull") + 1  # DIVERGED 的 Pull 也有 *
+            assert t.count("[") == 1 and t.count("]") == 1, \
+                f"{st.name} active={active}: {t!r}"
+            name = {"push": "Push", "pull": "Pull", "files": "Files"}[active]
+            # 选中项恰一个括号对；带 * 时括号包住 *文本*（星逻辑由 sync_marks 测试覆盖）
+            assert f"[{name}]" in t or f"[*{name}*]" in t, \
+                f"{st.name} active={active}: {t!r}"
 
 
-def test_menu_text_spacing_stable_across_cursor():
-    """间隙恒 12（项宽 = 前缀1 + 框2 + 文本4 + pad5），任何状态与光标下不变。"""
-    for active in ("push", "pull", "files"):
-        text = _strip_markup(render_menu(_info(RepoStatus.CLEAN), active=active))
-        i_push, i_pull, i_files = (text.index(t) for t in ("Push", "Pull", "Files"))
-        assert i_pull - i_push == 12, f"active={active}: {text!r}"
-        assert i_files - i_pull == 12, f"active={active}: {text!r}"
+def test_menu_widths_selected_vs_unselected():
+    """三项槽位等宽（12 列），行总宽恒 36，与选中项/同步标记无关。
+
+    框选左右移动、`*` 增减只改槽内留白：未选中项文本列位置在任何
+    active 下零偏移；自身被选中时仅槽内居中位置微调（括号 +2）。
+    """
+    for st, kw in [(RepoStatus.CLEAN, {}),
+                   (RepoStatus.CHANGED, {"modified": 1}),
+                   (RepoStatus.DIVERGED, {"ahead": 1, "behind": 1})]:
+        base = _strip_markup(render_menu(_info(st, **kw)))  # active=None 全未选中
+        assert len(base) == 36, f"{st.name}: {base!r} len={len(base)}"
+        for active in ("push", "pull", "files"):
+            text = _strip_markup(render_menu(_info(st, **kw), active=active))
+            assert len(text) == 36, \
+                f"{st.name} active={active}: {text!r} len={len(text)}"
+    # 未选中项位置不受框选影响：Pull 列位置在 active=push/files/None 下一致
+    positions = {_strip_markup(render_menu(_info(RepoStatus.CLEAN),
+                                           active=a)).find("Pull")
+                 for a in (None, "push", "files")}
+    assert len(positions) == 1, f"Pull 位置漂移: {positions}"
+    positions = {_strip_markup(render_menu(_info(RepoStatus.CLEAN),
+                                           active=a)).find("Push")
+                 for a in (None, "pull", "files")}
+    assert len(positions) == 1, f"Push 位置漂移: {positions}"
 
 
 # ── 无回显化：文件视图失败标记 ──
