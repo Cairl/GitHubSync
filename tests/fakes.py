@@ -36,6 +36,8 @@ class FakeGitProvider:
         self.clean_ok = True
         self.clean_calls = 0
         self.remote_head_hash: str | None = None
+        self.porcelain_calls = 0        # get_porcelain 调用计数（懒加载断言）
+        self.recent_commits_calls = 0   # get_recent_commits 调用计数
 
     # ── GitProvider 协议 ──
     def get_status(self) -> dict:
@@ -99,6 +101,7 @@ class FakeGitProvider:
         return len(set(self.files) - self.tracked)
 
     def get_porcelain(self) -> str:
+        self.porcelain_calls += 1
         lines = []
         for f in sorted(set(self.files) - self.tracked):
             lines.append(f" M {f}")
@@ -107,6 +110,7 @@ class FakeGitProvider:
         return "\n".join(lines)
 
     def get_recent_commits(self, limit: int = 20) -> list[dict]:
+        self.recent_commits_calls += 1
         return [
             {"hash": c, "time": "2026-01-01 00:00:00"}
             for c in self.commits[-limit:][::-1]
@@ -216,3 +220,29 @@ class FakeGitHubProvider:
     def ensure_repo_created(self, repo_name: str) -> str | None:
         self.repo_created_url = f"https://github.com/{self.username}/{repo_name}"
         return self.repo_created_url
+
+
+def make_services(**git_kw):
+    """交互/视图测试共用的 Services 工厂：FakeProvider 组装，支持属性注入。"""
+    from core.events import DomainEventBus
+    from core.file_ops_service import FileOpsService
+    from core.release_service import ReleaseService
+    from core.restore_service import RestoreService
+    from core.services import Services
+    from core.status_service import StatusService
+    from core.sync_service import SyncService
+
+    bus = DomainEventBus()
+    git = FakeGitProvider()
+    for k, v in git_kw.items():
+        setattr(git, k, v)
+    gh = FakeGitHubProvider()
+    release = ReleaseService(gh, bus, "fake_repo")
+    return Services(
+        git=git, gh=gh, bus=bus,
+        status=StatusService(git, "fake_repo"),
+        sync=SyncService(git, gh, bus, "fake_repo", release),
+        restore=RestoreService(git, bus),
+        file_ops=FileOpsService(git, bus, "fake_repo"),
+        release=release,
+    )
