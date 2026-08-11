@@ -123,6 +123,23 @@ class GitProvider(Protocol):
         """git clean -fd：删除未跟踪文件与目录（被 gitignore 的保留）。"""
         ...
 
+    # ── 分支管理 ──
+    def list_branches(self) -> list[str]:
+        """本地分支列表（含当前分支）；无仓库返回 []。"""
+        ...
+
+    def switch_branch(self, name: str, create: bool = False) -> tuple[bool, str]:
+        """git switch [-c] <name> → (成功, 输出)。"""
+        ...
+
+    def merge(self, branch: str) -> tuple[bool, str]:
+        """git merge <branch>（合入当前分支）→ (成功, 输出)。"""
+        ...
+
+    def merge_abort(self) -> None:
+        """git merge --abort（冲突复原，不留半截合并状态）。"""
+        ...
+
 
 class GitHubProvider(Protocol):
     """gh 子进程能力抽象。"""

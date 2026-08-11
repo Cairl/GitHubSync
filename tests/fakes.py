@@ -38,6 +38,13 @@ class FakeGitProvider:
         self.remote_head_hash: str | None = None
         self.porcelain_calls = 0        # get_porcelain 调用计数（懒加载断言）
         self.recent_commits_calls = 0   # get_recent_commits 调用计数
+        self.branches: list[str] = ["main"]
+        self.switch_calls: list[tuple[str, bool]] = []
+        self.switch_ok = True
+        self.merge_calls: list[str] = []
+        self.merge_ok = True
+        self.merge_abort_calls = 0
+        self.list_branches_calls = 0    # list_branches 调用计数（懒加载断言）
 
     # ── GitProvider 协议 ──
     def get_status(self) -> dict:
@@ -184,6 +191,31 @@ class FakeGitProvider:
     def clean_untracked(self) -> bool:
         self.clean_calls += 1
         return self.clean_ok
+
+    # ── 分支管理 ──
+    def list_branches(self) -> list[str]:
+        self.list_branches_calls += 1
+        return list(self.branches)
+
+    def switch_branch(self, name: str, create: bool = False) -> tuple[bool, str]:
+        self.switch_calls.append((name, create))
+        if not self.switch_ok:
+            return False, "fatal: invalid reference"
+        if create and name not in self.branches:
+            self.branches.append(name)
+        if name not in self.branches:
+            return False, f"fatal: invalid reference: {name}"
+        self.branch = name
+        return True, ""
+
+    def merge(self, branch: str) -> tuple[bool, str]:
+        self.merge_calls.append(branch)
+        if not self.merge_ok:
+            return False, "CONFLICT (content): Merge conflict"
+        return True, ""
+
+    def merge_abort(self) -> None:
+        self.merge_abort_calls += 1
 
 
 class FakeGitHubProvider:

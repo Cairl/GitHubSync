@@ -232,3 +232,24 @@ class GitCLIProvider:
         """git clean -fd：删除未跟踪文件与目录（不传 -x，保留被 gitignore 的文件）。"""
         ok, _ = run_command(["git", "clean", "-fd"], cwd=self.cwd)
         return ok
+
+    # ── 分支管理 ──
+    def list_branches(self) -> list[str]:
+        ok, out = run_command(["git", "branch", "--format=%(refname:short)"],
+                              cwd=self.cwd)
+        if not ok:
+            return []
+        return [line.strip() for line in out.splitlines() if line.strip()]
+
+    def switch_branch(self, name: str, create: bool = False) -> tuple[bool, str]:
+        cmd = ["git", "switch"]
+        if create:
+            cmd.append("-c")
+        cmd.append(name)
+        return run_command(cmd, cwd=self.cwd)
+
+    def merge(self, branch: str) -> tuple[bool, str]:
+        return run_command(["git", "merge", branch], cwd=self.cwd)
+
+    def merge_abort(self) -> None:
+        run_command(["git", "merge", "--abort"], cwd=self.cwd)
