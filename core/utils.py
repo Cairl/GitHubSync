@@ -1,18 +1,13 @@
-"""终端工具：VT100 启用、msvcrt 单键读取、CJK 显示宽度计算。
+"""终端工具：msvcrt 单键读取、光标显隐、CJK 显示宽度计算。
 
 仅交互模式（tui/）依赖本模块；cli/ 与 core/ 其余模块零 msvcrt 依赖。
+VT100 启用见 core/ansi.py 的 supports_color（ctypes 实现，零子进程）。
 """
 from __future__ import annotations
 
 import msvcrt
-import os
 import sys
 import unicodedata
-
-
-def enable_vt100() -> None:
-    """启用 Windows VT100 终端处理（ANSI 转义序列生效）。"""
-    os.system("")
 
 
 def hide_cursor() -> None:

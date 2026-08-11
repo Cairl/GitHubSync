@@ -20,7 +20,7 @@ from core.sync_service import SyncService
 from .renderer import markup_to_ansi
 from .view_base import ViewBase
 
-# 单字母状态 → 符号标记（TUI 显示用；CLI format_diff 保持字母契约不变）
+# 单字母状态 → 符号标记（TUI 显示用；core.status.format_diff 保持字母契约不变）
 _CHANGE_CN = {"A": "[+]", "M": "[~]", "D": "[-]"}
 # 符号语义色：新增=柔和浅绿 / 修改=警告黄 / 删除=错误红
 _CHANGE_COLOR = {"A": COLOR_SUCCESS_SOFT, "M": COLOR_WARN, "D": COLOR_ERROR}
@@ -92,7 +92,7 @@ class PushView(ViewBase):
         符号单独经 markup 着色，文件名保持纯文本（防止仓库文件名中的方括号
         被 markup 误解析）。
         """
-        from cli.output import format_diff
+        from core.status import format_diff
         lines = []
         for line in format_diff(self.git.get_porcelain()):
             if len(line) >= 3 and line[1] == " ":
@@ -116,7 +116,7 @@ class PushView(ViewBase):
 
     def _begin_push(self) -> list[str]:
         """渲染 [·] 视图（零 fetch，Enter 一瞬反馈）；返回待推路径（空=无可推）。"""
-        from cli.output import format_diff
+        from core.status import format_diff
         paths = [line[3:] for line in format_diff(self.git.get_porcelain())
                  if len(line) >= 3 and line[1] == " "]
         info = self._get_info()

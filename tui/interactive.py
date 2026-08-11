@@ -12,6 +12,8 @@ Backspace/Esc 与其余键均为无效键（零输出）。退出无专用按键
 from __future__ import annotations
 
 import os
+import sys
+import time
 import webbrowser
 from typing import Callable
 
@@ -20,7 +22,8 @@ from core.config import (KEY_DOWN, KEY_ENTER, KEY_LEFT, KEY_O, KEY_RIGHT,
 from core.i18n import tr
 from core.services import Services
 from core.status import RepoInfo
-from core.utils import enable_vt100, get_key, hide_cursor, show_cursor
+from core.ansi import supports_color
+from core.utils import get_key, hide_cursor, show_cursor
 
 from .branch_view import BranchView
 from .files_view import FilesView
@@ -52,11 +55,14 @@ class InteractiveApp:
 
     def __init__(self, svc: Services, repo_path: str,
                  key_source: Callable[[], bytes] = get_key,
-                 out: Callable[[str], None] = print):
+                 out: Callable[[str], None] = print,
+                 cooldown: float = 1.0):
         self.svc = svc
         self.repo_path = repo_path
         self._key = key_source
         self._out = out
+        self._cooldown = cooldown      # 动作执行后的 Enter 冷却期（秒），防连按
+        self._last_action = 0.0        # 上次动作时间戳（time.monotonic）
         self._project = os.path.basename(self.repo_path.rstrip("\\/")) or self.repo_path
         self._info: RepoInfo | None = None
         self._view: str = ""              # 内容区视图块文本（当前标签 render 结果）
@@ -178,7 +184,8 @@ class InteractiveApp:
 
     # ── 主循环 ──
     def run(self) -> int:
-        enable_vt100()
+        # 启动即启用 VT100（ctypes 实现，零子进程；渲染路径另有惰性兜底）
+        supports_color(sys.stdout)
         hide_cursor()
         try:
             return self._run()
@@ -214,6 +221,9 @@ class InteractiveApp:
                 # 隐藏快捷键：打开远程仓库，不影响标签选择
                 self._open_remote(info)
             elif key in (KEY_UP, KEY_DOWN, KEY_ENTER):
+                if key == KEY_ENTER and \
+                        time.monotonic() - self._last_action < self._cooldown:
+                    continue  # 冷却期内吞掉 Enter，防连按重复执行危险动作
                 view = self._current()
                 stale = view.handle_key(key)
                 for vid in stale:
@@ -221,6 +231,8 @@ class InteractiveApp:
                 if self._active in stale:
                     view.activate()  # 当前视图数据过期：立即重扫
                 self._set_view(view.render())
+                if key == KEY_ENTER and stale:
+                    self._last_action = time.monotonic()
             # 其余键（含 Backspace/Esc）：无效键，零输出
 
     # ── 标签与动作 ──

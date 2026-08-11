@@ -68,3 +68,33 @@ def decide_status(*, ahead: int, behind: int, changes: int) -> RepoStatus:
     if changes:
         return RepoStatus.CHANGED
     return RepoStatus.CLEAN
+
+
+# porcelain 两位状态码 → 单字母（R/T/U/C 归并到 M/A）
+_DIFF_LETTERS = {"?": "A", "A": "A", "C": "A", "D": "D",
+                 "R": "M", "M": "M", "T": "M", "U": "M"}
+
+
+def format_diff(porcelain: str) -> list[str]:
+    """porcelain → ["M  src/main.py", ...] 单字母变化列表。
+
+    兼容 run_command 整体 strip 导致首行丢失前导空格的退化形式（"M a.py"）。
+    CLI diff 子命令与 TUI 推送页共用（通用 porcelain 解析，属 core 层）。
+    """
+    lines = []
+    for raw in porcelain.splitlines():
+        if not raw.strip():
+            continue
+        if len(raw) >= 3 and raw[2] == " ":
+            x, y, path = raw[0], raw[1], raw[3:]
+        elif len(raw) >= 2:
+            # 退化形式：首行前导空格被 strip，仅剩一位状态码
+            x, y, path = raw[0], " ", raw[2:]
+        else:
+            continue
+        letter = _DIFF_LETTERS.get(x if x != " " else y, "M")
+        path = path.strip().strip('"')
+        if " -> " in path:
+            path = path.split(" -> ")[-1].strip().strip('"')
+        lines.append(f"{letter}  {path}")
+    return lines

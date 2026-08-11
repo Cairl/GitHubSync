@@ -529,8 +529,23 @@ def test_push_result_cleared_on_empty_push():
     out_lines = []
     app = InteractiveApp(svc, "fake_repo",
                          key_source=scripted([KEY_ENTER, KEY_ENTER]),
-                         out=out_lines.append)
+                         out=out_lines.append,
+                         cooldown=0)  # 测试连按语义，关闭冷却期
     with pytest.raises(StopIteration):
         app.run()
     assert app._views["push"]._push_result is False
     assert "[✓]" not in app._view
+
+
+def test_enter_swallowed_during_cooldown():
+    """冷却期：动作执行后 1 秒内连按 Enter 被吞掉（防连按重复执行）。"""
+    svc = make_services(initialized=True, remote="x", files={"a.py": "1"})
+    out_lines = []
+    app = InteractiveApp(svc, "fake_repo",
+                         key_source=scripted([KEY_ENTER, KEY_ENTER]),
+                         out=out_lines.append)  # 默认 cooldown=1.0
+    with pytest.raises(StopIteration):
+        app.run()
+    # 第二个 Enter 被吞：推送结果锁定未清除（空推送清锁定逻辑未触发）
+    assert app._views["push"]._push_result is True
+    assert "[✓]" in app._view

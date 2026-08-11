@@ -47,7 +47,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = _ArgumentParser(
         prog="githubsync",
         description=tr("GitHub 同步工具：查看 → 决策 → 执行 → 完成",
-                       "GitHub sync tool: see → decide → act → done"))
+                       "GitHub sync tool: see → decide → act → done"),
+        epilog=tr("无子命令时可直接给仓库目录：githubsync C:\\path\\to\\project",
+                  "without a subcommand, pass a repo directory: "
+                  "githubsync C:\\path\\to\\project"))
     p.add_argument("--version", action="version",
                    version=f"%(prog)s {__version__}")
     sub = p.add_subparsers(dest="command")

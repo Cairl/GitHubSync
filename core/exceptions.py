@@ -29,13 +29,8 @@ class NetworkError(SyncError):
     """网络连接异常。"""
 
 
-class CommandTimeoutError(Exception):
-    """子进程命令执行超时。"""
-
-    def __init__(self, message: str, detail: str | None = None):
-        super().__init__(message)
-        self.message = message
-        self.detail = detail
+class CommandTimeoutError(SyncError):
+    """子进程命令执行超时（归入同步异常体系，TUI/CLI 按 SyncError 统一兜底）。"""
 
 
 def classify_push_error(detail: str) -> SyncError:

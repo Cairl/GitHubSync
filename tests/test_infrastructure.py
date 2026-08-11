@@ -62,6 +62,12 @@ def test_run_command_timeout():
         run_command(["python", "-c", "import time; time.sleep(5)"], timeout=0.3)
 
 
+def test_timeout_error_is_sync_error():
+    """超时归入同步异常体系：TUI/CLI 的 SyncError 兜底能接住，不再穿透闪退。"""
+    from core.exceptions import SyncError
+    assert issubclass(CommandTimeoutError, SyncError)
+
+
 def test_run_command_success():
     ok, out = run_command([sys.executable, "-c", "print('hello')"])
     assert ok is True

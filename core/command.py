@@ -12,15 +12,15 @@ from .exceptions import CommandTimeoutError
 DEFAULT_TIMEOUT = 120.0
 
 
-def run_command(command, cwd: str | None = None,
+def run_command(command: list[str], cwd: str | None = None,
                 timeout: float | None = None) -> tuple[bool, str]:
     """执行子进程命令，返回 (成功, 合并输出)。
 
-    command 为列表时不经 shell；超时抛 CommandTimeoutError。
+    command 仅接受参数列表（永远不经 shell，杜绝注入）；超时抛 CommandTimeoutError。
     """
     try:
         result = subprocess.run(
-            command, cwd=cwd, shell=not isinstance(command, list), check=True,
+            command, cwd=cwd, check=True,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", errors="replace", timeout=timeout,
         )

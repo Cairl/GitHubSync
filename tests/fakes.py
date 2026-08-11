@@ -27,6 +27,7 @@ class FakeGitProvider:
         self.fail_mode = "ok"       # ok | repo_not_found | rejected | network
         self.force_push_calls = 0
         self.force_fail = False     # True 时强推也失败（模拟分支保护）
+        self.push_branches: list[str] = []  # 每次 push 的目标分支（推送契约断言）
         self.identity_configured = False
         self.ahead = 0
         self.behind = 0
@@ -133,6 +134,7 @@ class FakeGitProvider:
         return True, ""
 
     def push(self, branch: str, upstream: bool = False, force: bool = False) -> tuple[bool, str]:
+        self.push_branches.append(branch)
         if force:
             self.force_push_calls += 1
             if self.force_fail:

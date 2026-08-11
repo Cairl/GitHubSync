@@ -6,7 +6,7 @@ GitHubSync 是一个 Windows 终端同步工具，将本地目录同步到 GitHu
 - **CLI 子命令**：`status` / `push` / `restore` / `diff` / `info` / `switch`，POSIX 输出契约（结果走 stdout、诊断走 stderr、isatty 着色、退出码 0/1/2/3）
 - **极简交互**：无子命令 + tty 时进入，顶栏常驻 + 内容区刷新，标签页单循环（`tui/interactive.py`）
 - **Release 发布**：检测到 `changelog.md` 时自动发布 GitHub Release
-- **自动创建仓库**、自动配置远程；推送 = 本地 1:1 覆盖远程（分叉自动强推），拉取 = 远程 1:1 复刻本地（reset + clean）
+- **自动创建仓库**、自动配置远程；推送 = 本地 1:1 覆盖远程当前分支（分叉自动强推；仅建仓初始化时改名一次 main，此后同步不动分支名），拉取 = 远程 1:1 复刻本地（reset + clean）
 
 - **语言**: Python 3.12+
 - **版本**: 3.0.0（定义于 `main.py`）
@@ -37,12 +37,12 @@ github_sync.bat          # Windows 启动器：Set-Location 到脚本目录后 p
 │   ├── git_provider.py  # GitCLIProvider：git CLI 实现
 │   ├── github_provider.py # GhCLIProvider：gh CLI 实现
 │   ├── gitignore_parser.py # GitignoreMatcher：完整 gitignore 规范解析
-│   └── utils.py         # enable_vt100 / get_key / hide_cursor / get_display_width
+│   └── utils.py         # get_key / hide_cursor / get_display_width（VT100 启用在 ansi.py）
 │
 ├── cli/                 # CLI 表现层：argparse + 输出格式化（零业务逻辑）
 │   ├── parser.py        # build_parser：子命令 / path / -C / --json 等
 │   ├── commands.py      # COMMANDS：各子命令执行函数（返回退出码）
-│   ├── output.py        # status_line / format_diff / 着色
+│   ├── output.py        # status_line / 着色（format_diff 已下沉 core/status.py）
 │   └── exit_codes.py    # EXIT_OK / EXIT_CHANGES / EXIT_DIVERGED / EXIT_FAILED
 │
 ├── tui/                 # 交互表现层：渲染纯函数 + 标签页视图（零业务逻辑、零子进程）

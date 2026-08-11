@@ -148,6 +148,57 @@ def test_sync_emits_action_logs(tmp_path):
     assert "ACTION" in levels and "DONE" in levels
 
 
+def test_sync_on_feature_branch_keeps_branch_and_push_target(tmp_path):
+    """契约：非 main 分支同步后分支名不变，推送目标为当前分支。"""
+    sync, git, gh, bus, _ = make_services(str(tmp_path))
+    git.init_repo()
+    git.remote = "https://github.com/octocat/repo"
+    git.branch = "feature"
+    git.branches = ["main", "feature"]
+    git.files["g.txt"] = "x"
+
+    result = sync.run()
+
+    assert result.pushed is True
+    assert git.branch == "feature"          # 分支名不被改名
+    assert git.push_branches == ["feature"]  # 推送目标是 feature 而非 main
+
+
+def test_sync_init_renames_to_main_once(tmp_path):
+    """契约：建仓初始化时默认分支改名 main 一次（模拟 git init 默认 master）。"""
+    sync, git, gh, bus, _ = make_services(str(tmp_path))
+    git.branch = "master"  # 模拟老版本 git init 的默认分支名
+    git.remote = "https://github.com/octocat/repo"
+    git.files["h.txt"] = "x"
+
+    result = sync.run()
+
+    assert result.pushed is True
+    assert git.branch == "main"
+    assert git.push_branches == ["main"]
+
+
+def test_sync_push_timeout_publishes_failed(tmp_path):
+    """推送超时不穿透：按 SyncError 兜底，发布 SyncFailed 事件。"""
+    from core.exceptions import CommandTimeoutError
+    sync, git, gh, bus, _ = make_services(str(tmp_path))
+    git.init_repo()
+    git.remote = "https://github.com/octocat/repo"
+    git.files["t.txt"] = "data"
+
+    def timeout_push(*args, **kwargs):
+        raise CommandTimeoutError("命令超时 / Command timed out: git push")
+
+    git.push = timeout_push
+
+    failed = []
+    bus.subscribe(SyncFailed, failed.append)
+
+    with pytest.raises(SyncError):
+        sync.run()
+    assert len(failed) == 1
+
+
 # ── RestoreService.restore_remote ──
 from core.restore_service import RestoreService
 

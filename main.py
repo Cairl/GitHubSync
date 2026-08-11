@@ -54,13 +54,27 @@ def main(argv: list[str] | None = None) -> int:
     from cli.commands import COMMANDS
     from cli.exit_codes import EXIT_FAILED
     from cli.parser import build_parser
+    from core.i18n import tr
 
     args_list = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
+
+    # 无子命令时的仓库目录位置参数：githubsync "C:\path\to\project"
+    # （argparse subparsers 会把未知首词判成 invalid choice，需在解析前取出）
+    top_path = None
+    if args_list and not args_list[0].startswith("-") \
+            and args_list[0] not in COMMANDS:
+        top_path = args_list.pop(0)
+        if not os.path.isdir(os.path.abspath(top_path)):
+            # 首参数既非子命令也非已存在目录：报错（防子命令笔误误入交互）
+            print(tr(f"目录不存在: {top_path}",
+                     f"Directory not found: {top_path}"), file=sys.stderr)
+            return EXIT_FAILED
+
     args = parser.parse_args(args_list)
 
     # 目录解析：-C/--repo 或位置参数优先，默认当前工作目录
-    repo = getattr(args, "repo", None) or getattr(args, "path", None)
+    repo = getattr(args, "repo", None) or getattr(args, "path", None) or top_path
     repo_path = os.path.abspath(repo) if repo else os.getcwd()
     svc = create_services(repo_path)
 

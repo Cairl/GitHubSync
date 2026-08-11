@@ -12,10 +12,10 @@ from core.events import ActionLog
 from core.exceptions import SyncError
 from core.i18n import tr
 from core.services import Services
-from core.status import RepoStatus
+from core.status import RepoStatus, format_diff
 
 from .exit_codes import EXIT_CHANGES, EXIT_DIVERGED, EXIT_FAILED, EXIT_OK
-from .output import (echo, err, format_diff, info_to_dict, print_action_log,
+from .output import (echo, err, info_to_dict, print_action_log,
                      print_error, print_step, print_success, print_warn,
                      status_markup)
 

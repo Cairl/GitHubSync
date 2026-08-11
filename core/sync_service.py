@@ -1,6 +1,7 @@
 """SyncService：全量同步编排（初始化 → 暂存 → 提交 → 推送 → Release）。
 
 推送语义（1:1，已批准行为变更）：本地目录是唯一事实来源；
+推送目标为当前分支（仅建仓初始化时改名一次 main，此后不动分支名）；
 普通 push 被拒（分叉）时自动强制推送，丢弃远程独有提交，不再抛错。
 """
 from __future__ import annotations
@@ -46,6 +47,8 @@ class SyncService:
             self.bus.publish(ActionLog("ACTION", tr("初始化 Git 仓库",
                                                     "Initializing git repository")))
             git.init_repo()
+            # 仅建仓时改名一次 main；此后同步不动分支名（推当前分支）
+            git.branch_to_main()
             self.bus.publish(ActionLog("DONE", tr("仓库已初始化",
                                                   "Repository initialized")))
         if not git.remote_url():
@@ -66,7 +69,6 @@ class SyncService:
             self.bus.publish(ActionLog("NOTE", tr("没有需要提交的更改",
                                                   "No changes to commit")))
 
-        git.branch_to_main()
         self.bus.publish(ActionLog("ACTION", tr("推送到 GitHub",
                                                 "Pushing to GitHub")))
         self._push_with_recovery()

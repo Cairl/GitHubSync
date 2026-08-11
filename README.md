@@ -18,8 +18,7 @@
 
 ## 技术栈
 
-- Python 3.12+
-- **Rich** >= 13.0（终端输出增强）
+- Python 3.12+（纯标准库，零第三方运行时依赖；终端着色由 `core/ansi.py` 自研实现）
 - **GitHub CLI** (`gh`)：用于 Releases 管理和仓库操作
 - **Git**：核心同步引擎
 
@@ -28,7 +27,7 @@
 ```bash
 git clone <repo-url>
 cd GitHubSync
-pip install -r requirements.txt
+pip install -e .
 ```
 
 ### 前置要求
@@ -100,8 +99,7 @@ GitHubSync/
 ├── main.py                # 入口：argparse 调度 + create_services 唯一组装点
 ├── github_sync.bat        # Windows 启动器
 ├── pyproject.toml         # 打包元数据（全局 githubsync 命令）
-├── requirements.txt       # Python 依赖
-├── changelog.md           # 版本更新日志（供 Release 读取）
+├── requirements.txt       # 空文件：零第三方依赖声明
 ├── AGENTS.md              # 开发文档
 ├── cli/                   # CLI 表现层（parser / commands / output / exit_codes）
 ├── core/                  # 业务层（Provider 协议 + 用例服务 + gitignore 解析）
@@ -131,4 +129,3 @@ GitHubSync/
 ## 许可证
 
 MIT
-test-line-for-visual-verification

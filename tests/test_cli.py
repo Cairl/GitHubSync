@@ -16,7 +16,8 @@ from core.sync_service import SyncService
 from cli import commands
 from cli.exit_codes import EXIT_CHANGES, EXIT_DIVERGED, EXIT_FAILED, EXIT_OK
 from cli.parser import build_parser
-from cli.output import format_diff, status_line, status_markup
+from cli.output import status_line, status_markup
+from core.status import format_diff
 from core import i18n
 from core.events import DomainEventBus
 
@@ -169,6 +170,41 @@ def test_main_resolves_repo_from_cwd(monkeypatch, tmp_path):
     code = main_module.main()
     # 未初始化的 git 仓库 → EXIT_FAILED（3），证明目录解析到 tmp_path
     assert code == EXIT_FAILED
+
+
+def test_main_accepts_top_level_path(monkeypatch, tmp_path):
+    """无子命令 + 路径：githubsync "C:\\path" 解析为仓库目录（AGENTS.md 契约）。"""
+    import main as main_module
+    captured = {}
+    monkeypatch.setattr(main_module, "create_services",
+                        lambda p: captured.setdefault("path", p))
+    monkeypatch.setattr(sys, "argv", ["githubsync", str(tmp_path)])
+    buf = io.StringIO()
+    with redirect_stderr(buf):
+        code = main_module.main()  # 非 tty：打印帮助并返回失败码
+    assert captured["path"] == os.path.abspath(str(tmp_path))
+    assert code == EXIT_FAILED
+
+
+def test_main_top_level_path_must_exist(monkeypatch, tmp_path):
+    """顶层路径不存在：报错走 stderr 返回 3（防子命令笔误误入交互）。"""
+    import main as main_module
+    missing = tmp_path / "no_such_dir"
+    monkeypatch.setattr(sys, "argv", ["githubsync", str(missing)])
+    buf = io.StringIO()
+    with redirect_stderr(buf):
+        code = main_module.main()
+    assert code == EXIT_FAILED
+    assert "not found" in buf.getvalue() or "Directory" in buf.getvalue()
+
+
+def test_main_unknown_arg_with_subcommand_errors(monkeypatch):
+    """子命令后携带未知参数：argparse 报错退出（SystemExit）。"""
+    import main as main_module
+    import pytest
+    monkeypatch.setattr(sys, "argv", ["githubsync", "status", "--bogus"])
+    with pytest.raises(SystemExit):
+        main_module.main()
 
 
 def test_format_diff_stripped_first_line():
