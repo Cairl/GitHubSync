@@ -7,6 +7,7 @@ from contextlib import redirect_stderr, redirect_stdout
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from core.branch_service import BranchService
 from core.file_ops_service import FileOpsService
 from core.release_service import ReleaseService
 from core.restore_service import RestoreService
@@ -45,6 +46,7 @@ def make_services(**git_kw):
         restore=RestoreService(git, bus),
         file_ops=FileOpsService(git, bus, "fake_repo"),
         release=release,
+        branch=BranchService(git, bus),
     )
 
 

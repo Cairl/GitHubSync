@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .branch_service import BranchService
 from .events import DomainEventBus
 from .file_ops_service import FileOpsService
 from .protocols import GitProvider, GitHubProvider
@@ -24,3 +25,4 @@ class Services:
     restore: RestoreService
     file_ops: FileOpsService
     release: ReleaseService
+    branch: BranchService

@@ -256,6 +256,7 @@ class FakeGitHubProvider:
 
 def make_services(**git_kw):
     """交互/视图测试共用的 Services 工厂：FakeProvider 组装，支持属性注入。"""
+    from core.branch_service import BranchService
     from core.events import DomainEventBus
     from core.file_ops_service import FileOpsService
     from core.release_service import ReleaseService
@@ -277,4 +278,5 @@ def make_services(**git_kw):
         restore=RestoreService(git, bus),
         file_ops=FileOpsService(git, bus, "fake_repo"),
         release=release,
+        branch=BranchService(git, bus),
     )

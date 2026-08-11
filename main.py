@@ -18,6 +18,7 @@ __version__ = "3.0.0"
 
 def create_services(repo_path: str):
     """组合根：唯一组装依赖的地方。"""
+    from core.branch_service import BranchService
     from core.events import DomainEventBus
     from core.file_ops_service import FileOpsService
     from core.git_provider import GitCLIProvider
@@ -39,6 +40,7 @@ def create_services(repo_path: str):
         restore=RestoreService(git, bus),
         file_ops=FileOpsService(git, bus, repo_path),
         release=release,
+        branch=BranchService(git, bus),
     )
 
 
