@@ -7,14 +7,14 @@ from __future__ import annotations
 import re
 
 from core.config import (COLOR_BRANCH_NAME, COLOR_LABEL, COLOR_MENU_ACTIVE_BG,
-                         COLOR_MENU_BG, COLOR_URL)
+                         COLOR_MENU_ACTIVE_FG, COLOR_MENU_BG, COLOR_URL)
 from core.i18n import tr
 from core.status import RepoInfo, RepoStatus
 from core.utils import get_display_width
 
 _MARKUP_RE = re.compile(r"\[/?[^\]]*\]")
 
-# 导航栏固定三项：顺序即 ← → 光标的移动顺序
+# 导航栏固定三项：顺序即 ← → 标签页的切换顺序
 MENU_ITEMS: list[tuple[str, str]] = [
     ("push", tr("推送", "Push")),
     ("pull", tr("拉取", "Pull")),
@@ -23,7 +23,7 @@ MENU_ITEMS: list[tuple[str, str]] = [
 
 
 def menu_for_action(action: str) -> str:
-    """推荐动作 → 初始光标落点菜单项（diff/refresh 无对应菜单项，落推送）。"""
+    """推荐动作 → 初始标签落点（diff/refresh 无对应标签项，落推送）。"""
     return {"push": "push", "restore_remote": "pull"}.get(action, "push")
 
 
@@ -79,8 +79,9 @@ _MENU_SLOT = max(get_display_width(t) + 4 for _, t in MENU_ITEMS) + 2
 def render_menu(info: RepoInfo, active: str | None = None) -> str:
     """菜单行（纯文本 markup，背景由 _menu_block 统一添加）。
 
-    导航栏固定三项：推送 / 拉取 / 文件（任何状态下一致），用 ← → 移动光标、
-    Enter 执行选中项。active: 当前光标选中的菜单项 id（push/pull/files）。
+    导航栏固定三项：推送 / 拉取 / 文件（任何状态下一致），← → 切换标签页
+    即显示内容（免 Enter），Enter 执行当前标签内选中项。
+    active: 当前标签 id（push/pull/files）。
     三项等宽：每项独占 _MENU_SLOT 列槽位（按语言动态计算，见常量注释），
     内容（含括号与 `*` 标记）在槽内居中，未选中项为裸文本；选中项括号
     （如 `[推送]`）+ 底色 #636363，底色紧贴内容、两侧各留 1 格（宽 = 内容 + 2），
@@ -101,7 +102,7 @@ def render_menu(info: RepoInfo, active: str | None = None) -> str:
             bg_w = get_display_width(label) + 4  # 括号 2 + 两侧留白 2
             margin = (_MENU_SLOT - bg_w) // 2
             parts.append(f"{' ' * margin}"
-                         f"[bold on {COLOR_MENU_ACTIVE_BG}] {inner} [/]"
+                         f"[bold {COLOR_MENU_ACTIVE_FG} on {COLOR_MENU_ACTIVE_BG}] {inner} [/]"
                          f"{' ' * (_MENU_SLOT - bg_w - margin)}")
         else:
             # 裸文本：无括号（仅选中项有括号），无隐形占位

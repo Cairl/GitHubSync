@@ -4,7 +4,7 @@
 
 GitHubSync 是一个 Windows 终端同步工具，将本地目录同步到 GitHub 仓库。基于 `git` 和 `gh` CLI 实现全部操作，提供 CLI 子命令与极简交互两种形态（CLI-first）。
 - **CLI 子命令**：`status` / `push` / `restore` / `diff` / `info`，POSIX 输出契约（结果走 stdout、诊断走 stderr、isatty 着色、退出码 0/1/2/3）
-- **极简交互**：无子命令 + tty 时进入，顶栏常驻 + 内容区刷新，单键循环（`tui/interactive.py`）
+- **极简交互**：无子命令 + tty 时进入，顶栏常驻 + 内容区刷新，标签页单循环（`tui/interactive.py`）
 - **Release 发布**：检测到 `changelog.md` 时自动发布 GitHub Release
 - **自动创建仓库**、自动配置远程；推送 = 本地 1:1 覆盖远程（分叉自动强推），拉取 = 远程 1:1 复刻本地（reset + clean）
 
@@ -45,15 +45,25 @@ github_sync.bat          # Windows 启动器：Set-Location 到脚本目录后 p
 │   ├── output.py        # status_line / format_diff / 着色
 │   └── exit_codes.py    # EXIT_OK / EXIT_CHANGES / EXIT_DIVERGED / EXIT_FAILED
 │
-├── tui/                 # 交互表现层：渲染纯函数 + 单键循环（零业务逻辑、零子进程）
+├── tui/                 # 交互表现层：渲染纯函数 + 标签页视图（零业务逻辑、零子进程）
 │   ├── screen.py        # render_header / render_menu / render_status_line 纯函数
-│   ├── interactive.py   # InteractiveApp：顶栏常驻 + 内容区刷新的主循环
-│   ├── files_view.py    # 文件视图：↑↓ 移动，Enter 切换推送/忽略
-│   ├── restore_view.py  # 拉取视图：本地历史提交，首个 Enter 对齐远程，其余恢复
-│   └── renderer.py      # DiffRenderer / markup_to_ansi
+│   ├── interactive.py   # InteractiveApp：顶栏常驻 + 内容区刷新 + 标签页单循环派发
+│   ├── view_base.py     # ViewBase：activate/render/handle_key/invalidate 懒加载骨架
+│   ├── push_view.py     # 推送标签页：待推清单 + [·]/[✓]/[✕] 状态机
+│   ├── pull_view.py     # 拉取标签页：本地历史提交，首个 Enter 对齐远程，其余恢复
+│   ├── files_view.py    # 文件标签页：↑↓ 移动，Enter 切换推送/忽略
+│   └── renderer.py      # markup_to_ansi
 │
 └── tests/               # pytest（fakes.py 内存版 Provider，无需真实 git/gh）
 ```
+
+### 标签页视图契约（ViewBase）
+
+- `activate()`：切入时调用，首次或失效后才 `_load()` 扫描数据（懒加载），缓存命中零扫描；
+- `render()`：缓存数据 → 内容区文本，纯函数零 I/O；
+- `handle_key(key)`：处理 ↑/↓/Enter，返回需失效的视图 id 列表，主循环统一 `invalidate()` 并对当前视图立即重扫；
+- `deactivate()`：切出时调用（默认无操作；PushView 借此清除推送结果锁定）；
+- 状态签名（status/change_count/ahead/behind）变化时主循环失效推送与拉取视图，当前视图立即重扫。
 
 ### 依赖规则
 
@@ -103,7 +113,7 @@ github_sync.bat
 # 语法检查（项目根目录执行）
 python -c "import py_compile, glob; [py_compile.compile(f, doraise=True) for f in glob.glob('main.py') + glob.glob('cli/**/*.py', recursive=True) + glob.glob('core/**/*.py', recursive=True) + glob.glob('tui/**/*.py', recursive=True)]"
 
-# 运行全部测试（102 个用例，FakeProvider 无需真实 git/gh）
+# 运行全部测试（FakeProvider 无需真实 git/gh）
 python -m pytest tests/ -v
 
 # 运行交互模式（同步当前工作目录）
@@ -118,26 +128,26 @@ python -m main
 - `test_sync_service.py`：同步流程、失败恢复（仓库不存在/非快进/网络错误）、事件发布；
 - `test_release_service.py`：版本号计算纯逻辑（YYwWWa 递增/跨周重置）、发布流程；
 - `test_infrastructure.py`：gitignore 解析、命令超时、重试装饰器；
-- `test_interactive.py`：渲染纯函数、推荐动作映射、菜单光标（← → + Enter）、主循环与视图交互（Enter 执行选中项、Backspace 返回）；
-- `test_renderer.py`：markup→ANSI 转换；
+- `test_interactive.py`：渲染纯函数、推荐动作映射、标签切换（← → 即显内容免 Enter）、主循环与视图交互；
+- `test_views.py`：标签页视图协议——懒加载（activate 幂等/失效重扫，FakeProvider 计数器断言）、handle_key 状态转移、渲染对齐；
 - 手动验证：`python -m main` 观察同步行为（交互模式无退出键，直接关闭窗口）。
 
 ## Keyboard Shortcuts
 
 | 按键 | 功能 |
 |---|---|
-| `←` `→` | 移动菜单光标（推送 / 拉取 / 文件，循环移动），`[ ]` 框选当前选中项 |
-| `Enter` | 执行光标选中的菜单项（推送 / 拉取 / 文件视图），初始光标停在推荐动作上 |
-| `↑` `↓` | 子视图内移动选中项（文件 / 拉取历史列表） |
+| `←` `→` | 循环切换标签页（推送 / 拉取 / 文件），切换即显示内容（免 Enter），`[ ]` 框选当前标签 |
+| `Enter` | 执行当前标签内选中项（推送 / 对齐远程·恢复历史 / 切换忽略），初始标签停在推荐动作上 |
+| `↑` `↓` | 标签内移动选中项（文件 / 拉取历史列表） |
 | `o` | 在浏览器中打开远程仓库（隐藏快捷键，不进菜单） |
-| `Backspace` / `Esc` | 从子视图返回主屏 |
 
+- Backspace / Esc 已废弃：按无效键处理（零输出），导航全靠 ← →
 - 导航栏固定三项：`推送` `拉取` `文件`（三项槽位等宽，`_MENU_SLOT` 按语言动态计算 = 最大内容（括号 2 + `*` 2 + 最长文本）+ 2：中文 10 / 英文 11，最密集时相邻间隙恒 2 格；内容槽内居中，仅选中项括号可见如 `[推送]` + `#636363` 底色紧贴内容、两侧各留 1 格（宽 = 内容 + 2），未选中项为裸文本无括号；框选左右移动、`*` 同步标记增减只改槽内留白，其他选项位置零偏移，行总宽恒 3×槽位，分叉时不再切换为恢复/强制推送）；推送 / 拉取有新的同步时文本两侧加 `*`（如 `*推送*`，选中时 `[*推送*]`，由 `_has_sync()` 判定：CHANGED/AHEAD/NO_REPO/NO_REMOTE/DIVERGED 标记推送，BEHIND/DIVERGED 标记拉取）
-- 拉取视图（`restore_view.py`）：本地最近 20 条提交列表（最新在前），光标默认首个——Enter 对齐远程（fetch + reset --hard origin/分支 + clean -fd，本地 1:1 复刻远程，丢弃本地已提交独有内容与未跟踪文件）；其余提交 Enter 恢复到该历史版本（无二次确认）；无提交时提示并返回
-- 菜单渲染见 `tui/screen.py`：`MENU_ITEMS` 定义项序（即 ← → 移动顺序），`menu_for_action()` 把推荐动作映射为初始光标落点（diff/refresh 无菜单项，落推送）
+- 拉取标签页（`pull_view.py`）：本地最近 20 条提交列表（最新在前），光标默认首个——Enter 对齐远程（fetch + reset --hard origin/分支 + clean -fd，本地 1:1 复刻远程，丢弃本地已提交独有内容与未跟踪文件）；其余提交 Enter 恢复到该历史版本（无二次确认）；无提交时显示提示文本
+- 菜单渲染见 `tui/screen.py`：`MENU_ITEMS` 定义项序（即 ← → 切换顺序），`menu_for_action()` 把推荐动作映射为初始标签落点（diff/refresh 无标签项，落推送）
 - 操作执行后有 1 秒冷却期，防止误触
 - 退出无专用按键：直接关闭终端窗口即可（Ctrl+C 兜底）
-- Enter 执行光标选中项，菜单不标注键位
+- Enter 执行当前标签内选中项，菜单不标注键位
 
 ## Code Style
 
@@ -162,9 +172,9 @@ python -m main
 - **禁止在渲染路径中执行子进程调用**（`build_screen`/`render_*` 只读缓存）
 
 ### 无回显化（同步操作结果由视图状态表达）
-- 推送：`InteractiveApp._push` 状态机——按 Enter 后 `_push_state` 接管视图，所有待推文件标记 `[·]`（灰，上传中）→ 成功 `[✓]`（绿）/ 失败 `[✕]`（红），停留 1 秒后交还主循环；git 仍为一次 commit + push
-- 拉取：`RestoreView` 通过 `GitProvider.remote_head()` 取远程跟踪引用，本地与远程一致的提交 hash 标浅绿 `COLOR_CYAN`（#ABDFA7，与 [✓] 同色），其余不变色
-- 文件视图：`FileOpsService.push_file/remove_file` 返回 bool，失败文件行首 `[!]`（红），按钮状态切换即成功指示
+- 推送：`PushView`（`tui/push_view.py`）状态机——按 Enter 后 `_push_state` 接管视图，所有待推文件标记 `[·]`（灰，上传中）→ 成功 `[✓]`（绿）/ 失败 `[✕]`（红），结果锁定常驻至切出标签或空推送；git 仍为一次 commit + push
+- 拉取：`PullView`（`tui/pull_view.py`）通过 `GitProvider.remote_head()` 取远程跟踪引用，本地与远程一致的提交 hash 标浅绿 `COLOR_CYAN`（#ABDFA7，与 [✓] 同色），其余不变色
+- 文件标签页：`FileOpsService.push_file/remove_file` 返回 bool，失败文件行首 `[!]`（红），按钮状态切换即成功指示
 - 失败原因完全无回显：`[✕]`/`[!]` 即全部反馈（排查用 CLI `status`）
 
 ## Troubleshooting
