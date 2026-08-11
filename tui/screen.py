@@ -70,8 +70,8 @@ def _has_sync(info: RepoInfo, item_id: str) -> bool:
     return False
 
 
-# 菜单槽位等宽：内容最大宽 = 括号 2 + `*` 同步标记 2 + 最长文本 5（Files）
-_MENU_SLOT = 12
+# 菜单槽位等宽：最长内容（括号 2 + `*` 同步标记 2 + 最长文本 5「Files」= 9）+ 两侧留白 2
+_MENU_SLOT = 11
 
 
 def render_menu(info: RepoInfo, active: str | None = None) -> str:
@@ -80,7 +80,8 @@ def render_menu(info: RepoInfo, active: str | None = None) -> str:
     导航栏固定三项：推送 / 拉取 / 文件（任何状态下一致），用 ← → 移动光标、
     Enter 执行选中项。active: 当前光标选中的菜单项 id（push/pull/files）。
     三项等宽：每项独占 _MENU_SLOT 列槽位，内容（含括号与 `*` 标记）在槽内居中，
-    选中项括号（如 `[推送]`）+ 底色 #636363 铺满整个槽位，未选中项为裸文本。
+    未选中项为裸文本；选中项括号（如 `[推送]`）+ 底色 #636363，底色紧贴内容、
+    两侧各留 1 格（宽 = 内容 + 2），底色块在槽内居中。
     槽位宽度与选中/同步标记无关——框选左右移动、`*` 增减都只改槽内留白，
     其他选项位置零偏移，行总宽恒为 3 * _MENU_SLOT。
     方括号经反斜杠转义，星号为字面字符（markup 语法无 `*` 斜体简写，无需转义）。
@@ -92,19 +93,19 @@ def render_menu(info: RepoInfo, active: str | None = None) -> str:
         star = "*" if synced else ""
         label = f"{star}{text}{star}"
         if selected:
-            # 可见括号 + 底色铺满槽位
+            # 可见括号 + 底色紧贴内容（两侧各 1 格），底色块槽内居中
             inner = "\\[" + label + "]"
-            inner_w = get_display_width(label) + 2
+            bg_w = get_display_width(label) + 4  # 括号 2 + 两侧留白 2
+            margin = (_MENU_SLOT - bg_w) // 2
+            parts.append(f"{' ' * margin}"
+                         f"[bold on {COLOR_MENU_ACTIVE_BG}] {inner} [/]"
+                         f"{' ' * (_MENU_SLOT - bg_w - margin)}")
         else:
             # 裸文本：无括号（仅选中项有括号），无隐形占位
-            inner = label
             inner_w = get_display_width(label)
-        left = (_MENU_SLOT - inner_w) // 2
-        right = _MENU_SLOT - inner_w - left
-        slot = f"{' ' * left}{inner}{' ' * right}"
-        if selected:
-            slot = f"[bold on {COLOR_MENU_ACTIVE_BG}]{slot}[/]"
-        parts.append(slot)
+            left = (_MENU_SLOT - inner_w) // 2
+            right = _MENU_SLOT - inner_w - left
+            parts.append(f"{' ' * left}{label}{' ' * right}")
     return "".join(parts)
 
 

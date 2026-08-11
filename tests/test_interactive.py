@@ -94,14 +94,14 @@ def test_render_menu_uniform_three_items():
 
 
 def test_render_menu_cursor_marks_active():
-    """仅选中项带可见括号 + 底色铺满槽位，未选中项裸文本（无隐形括号）。"""
+    """仅选中项带可见括号 + 底色紧贴内容（两侧各 1 格，槽内居中），未选中项裸文本。"""
     menu = render_menu(_info(RepoStatus.CLEAN), active="push")
-    assert "[bold on #636363]   \\[Push]   [/]" in menu
+    assert " [bold on #636363] \\[Push] [/]  " in menu
     assert "[#292929]" not in menu  # 无隐形括号
     sel = _strip_markup(menu)
     assert "[Push]" in sel and "[Pull]" not in sel and "[Files]" not in sel
     menu_right = render_menu(_info(RepoStatus.CLEAN), active="files")
-    assert "[bold on #636363]  \\[Files]   [/]" in menu_right
+    assert " [bold on #636363] \\[Files] [/] " in menu_right
     assert "[#292929]" not in menu_right
     sel_right = _strip_markup(menu_right)
     assert "[Files]" in sel_right and "[Push]" not in sel_right
@@ -487,7 +487,7 @@ def test_menu_brackets_only_on_selected():
 
 
 def test_menu_widths_selected_vs_unselected():
-    """三项槽位等宽（12 列），行总宽恒 36，与选中项/同步标记无关。
+    """三项槽位等宽（11 列），行总宽恒 33，与选中项/同步标记无关。
 
     框选左右移动、`*` 增减只改槽内留白：未选中项文本列位置在任何
     active 下零偏移；自身被选中时仅槽内居中位置微调（括号 +2）。
@@ -496,10 +496,10 @@ def test_menu_widths_selected_vs_unselected():
                    (RepoStatus.CHANGED, {"modified": 1}),
                    (RepoStatus.DIVERGED, {"ahead": 1, "behind": 1})]:
         base = _strip_markup(render_menu(_info(st, **kw)))  # active=None 全未选中
-        assert len(base) == 36, f"{st.name}: {base!r} len={len(base)}"
+        assert len(base) == 33, f"{st.name}: {base!r} len={len(base)}"
         for active in ("push", "pull", "files"):
             text = _strip_markup(render_menu(_info(st, **kw), active=active))
-            assert len(text) == 36, \
+            assert len(text) == 33, \
                 f"{st.name} active={active}: {text!r} len={len(text)}"
     # 未选中项位置不受框选影响：Pull 列位置在 active=push/files/None 下一致
     positions = {_strip_markup(render_menu(_info(RepoStatus.CLEAN),
