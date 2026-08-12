@@ -24,8 +24,9 @@ class PullView(ViewBase):
     id = "pull"
 
     def __init__(self, restore: RestoreService, git: GitProvider,
-                 max_rows: Callable[[], int]):
-        super().__init__()
+                 max_rows: Callable[[], int],
+                 executor=None, on_loaded=None):
+        super().__init__(executor=executor, on_loaded=on_loaded)
         self.restore = restore
         self.git = git
         self._max_rows = max_rows  # 列表可见窗口高度
@@ -40,7 +41,7 @@ class PullView(ViewBase):
                        for c in self.git.get_recent_commits(20)]
         self._index = max(0, min(self._index, len(self._items) - 1))
 
-    def render(self) -> str:
+    def _render(self) -> str:
         if not self._items:
             return markup_to_ansi(  # 无提交历史占位
                 f"[{COLOR_PLACEHOLDER}]none[/]")
@@ -62,6 +63,8 @@ class PullView(ViewBase):
         return "\n".join(lines)
 
     def handle_key(self, key: bytes) -> list[str]:
+        if self._loading:
+            return []  # loading 期间一律无效键
         if not self._items:
             return []
         if key == KEY_UP:

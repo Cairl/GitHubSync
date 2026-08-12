@@ -481,3 +481,67 @@ def test_empty_state_none_colored_gray(monkeypatch, tmp_path):
     branch.activate()
     assert gray in branch.render() and "none" in branch.render()
 
+
+
+# ── loading 态（异步加载）──
+class _ManualExecutor:
+    """测试用可控执行器：submit 存任务不执行，run_pending 手动触发。"""
+
+    def __init__(self):
+        self._pending = []
+
+    def submit(self, fn, callback):
+        self._pending.append((fn, callback))
+
+    def run_pending(self):
+        pending, self._pending = self._pending, []
+        for fn, callback in pending:
+            try:
+                callback(fn())
+            except Exception:
+                callback(None)
+
+    def shutdown(self):
+        pass
+
+
+def test_view_loading_state_blank_render():
+    """loading 期间 render 返回空串（留白），完成后正常渲染。"""
+    from tui.pull_view import PullView
+    svc = make_services(initialized=True, remote="x",
+                        commits=["abcdef1234567890"])
+    gate = _ManualExecutor()
+    view = PullView(svc.restore, svc.git, max_rows=lambda: 20, executor=gate)
+    view.activate()
+    assert view.render() == ""          # loading 留白
+    gate.run_pending()                  # 手动完成加载
+    assert "abcdef12" in view.render()
+
+
+def test_view_enter_noop_while_loading():
+    """loading 期间 Enter 无效（推送页尤其不得触发空推送流程）。"""
+    from tui.push_view import PushView
+    svc = make_services(initialized=True, remote="x", files={"a.py": "1"})
+    gate = _ManualExecutor()
+    info = svc.status.get_status(fetch=False)
+    view = PushView(svc.sync, svc.git, get_info=lambda: info,
+                    refresh_status=lambda f: info, paint=lambda t: None,
+                    executor=gate)
+    view.activate()
+    assert view.handle_key(b"\r") == []     # KEY_ENTER
+    gate.run_pending()
+    assert view.handle_key(b"\r") != [] or svc.git.commits  # 完成后恢复正常
+
+
+def test_view_on_loaded_callback_fires():
+    """加载完成触发 on_loaded 回调（主循环借此重绘内容区）。"""
+    from tui.files_view import FilesView
+    svc = make_services(initialized=True, remote="x")
+    gate = _ManualExecutor()
+    seen = []
+    view = FilesView(svc.file_ops, executor=gate,
+                     on_loaded=lambda: seen.append(1))
+    view.activate()
+    assert seen == []                   # 未完成不触发
+    gate.run_pending()
+    assert seen == [1]

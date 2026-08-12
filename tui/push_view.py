@@ -63,8 +63,9 @@ class PushView(ViewBase):
     def __init__(self, sync: SyncService, git: GitProvider,
                  get_info: Callable[[], RepoInfo],
                  refresh_status: Callable[[bool], RepoInfo],
-                 paint: Callable[[str], None]):
-        super().__init__()
+                 paint: Callable[[str], None],
+                 executor=None, on_loaded=None):
+        super().__init__(executor=executor, on_loaded=on_loaded)
         self.sync = sync
         self.git = git
         self._get_info = get_info
@@ -92,7 +93,7 @@ class PushView(ViewBase):
         self._lines = self._diff_lines()
 
     # ── 渲染（纯函数，只读缓存）──
-    def render(self) -> str:
+    def _render(self) -> str:
         if self._push_state is not None:
             return "\n".join(self._render_push_lines())
         lines = "\n".join(self._lines)
@@ -103,6 +104,8 @@ class PushView(ViewBase):
 
     # ── 键处理 ──
     def handle_key(self, key: bytes) -> list[str]:
+        if self._loading:
+            return []  # loading 期间无数据，Enter 不得触发推送流程
         if key != KEY_ENTER:
             return []
         had_result = self._push_result

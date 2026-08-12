@@ -94,16 +94,21 @@ class InteractiveApp:
         self._release_tag: str | None = None  # 最新 Release 版本号（启动时获取一次，发布后刷新）
         # Release 发布成功后刷新顶栏版本号（同步在推送流程内执行，事件同步派发）
         svc.bus.subscribe(ReleasePublished, lambda e: self._refresh_release_tag())
-        # 视图注册表：构造即建（零扫描），数据懒加载在 activate
+        # 视图注册表：构造即建（零扫描），数据懒加载在 activate（异步，loading 态）
+        on_loaded = lambda: self._events.put(("view", None))
         self._views: dict[str, ViewBase] = {
             "push": PushView(svc.sync, svc.git,
                              get_info=lambda: self._info,
                              refresh_status=self._refresh_status,
-                             paint=self._set_view),
-            "pull": PullView(svc.restore, svc.git, max_rows=self._content_rows),
-            "files": FilesView(svc.file_ops),
+                             paint=self._set_view,
+                             executor=self._executor, on_loaded=on_loaded),
+            "pull": PullView(svc.restore, svc.git, max_rows=self._content_rows,
+                             executor=self._executor, on_loaded=on_loaded),
+            "files": FilesView(svc.file_ops,
+                               executor=self._executor, on_loaded=on_loaded),
             "branch": BranchView(svc.branch, svc.git,
-                                 max_rows=self._content_rows),
+                                 max_rows=self._content_rows,
+                                 executor=self._executor, on_loaded=on_loaded),
         }
 
     # ── 渲染 ──

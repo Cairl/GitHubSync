@@ -31,8 +31,9 @@ class BranchView(ViewBase):
     id = "branch"
 
     def __init__(self, branch: BranchService, git: GitProvider,
-                 max_rows: Callable[[], int]):
-        super().__init__()
+                 max_rows: Callable[[], int],
+                 executor=None, on_loaded=None):
+        super().__init__(executor=executor, on_loaded=on_loaded)
         self.branch = branch
         self.git = git
         self._max_rows = max_rows  # 列表可见窗口高度
@@ -56,7 +57,7 @@ class BranchView(ViewBase):
         rows += [(b, b) for b in self._branches]
         return rows
 
-    def render(self) -> str:
+    def _render(self) -> str:
         rows = self._rows()
         if not rows:
             return markup_to_ansi(  # 无分支占位
@@ -76,6 +77,8 @@ class BranchView(ViewBase):
         return "\n".join(lines)
 
     def handle_key(self, key: bytes) -> list[str]:
+        if self._loading:
+            return []  # loading 期间一律无效键
         rows = self._rows()
         if not rows:
             return []

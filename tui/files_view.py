@@ -82,8 +82,9 @@ class FilesView(ViewBase):
 
     id = "files"
 
-    def __init__(self, file_ops: FileOpsService):
-        super().__init__()
+    def __init__(self, file_ops: FileOpsService,
+                 executor=None, on_loaded=None):
+        super().__init__(executor=executor, on_loaded=on_loaded)
         self.file_ops = file_ops
         self._items: list[dict] = []
         self._index = 0
@@ -95,7 +96,7 @@ class FilesView(ViewBase):
                        if i["action_text"]]
         self._index = max(0, min(self._index, len(self._items) - 1))
 
-    def render(self) -> str:
+    def _render(self) -> str:
         if not self._items:
             return markup_to_ansi(  # 无文件占位
                 f"[{COLOR_PLACEHOLDER}]none[/]")
@@ -115,6 +116,8 @@ class FilesView(ViewBase):
         return "\n".join(lines)
 
     def handle_key(self, key: bytes) -> list[str]:
+        if self._loading:
+            return []  # loading 期间一律无效键
         if not self._items:
             return []
         if key == KEY_UP:
