@@ -57,6 +57,23 @@ def test_sync_no_changes(tmp_path):
     assert result.pushed is True
 
 
+def test_sync_changelog_committed_not_ignored(tmp_path):
+    """changelog.md 不被 .gitignore 排除：残留条目被清理，正常暂存、提交、入库。"""
+    sync, git, gh, bus, _ = make_services(str(tmp_path))
+    git.init_repo()
+    git.remote = "https://github.com/octocat/repo"
+    git.gitignore_lines = ["__pycache__/", "changelog.md"]  # 旧版残留
+    git.files["a.txt"] = "hello"
+    git.files["changelog.md"] = "# v1.0"
+
+    result = sync.run()
+
+    assert result.committed == 1
+    assert "changelog.md" in result.updated_items   # 计入提交项
+    assert "changelog.md" in git.tracked            # 已提交入库
+    assert "changelog.md" not in git.gitignore_lines  # 残留条目被清理
+
+
 def test_sync_repo_not_found_recovers(tmp_path):
     sync, git, gh, bus, _ = make_services(str(tmp_path))
     git.init_repo()

@@ -40,7 +40,8 @@ class SyncService:
     def _run(self) -> SyncCompleted:
         git = self.git
         git.create_ignore()
-        git.ensure_gitignore_entry("changelog.md")
+        # changelog.md 不入 ignore：清理旧版残留条目，保证始终可入库
+        git.remove_from_gitignore_file("changelog.md")
 
         st = git.get_status()
         if not st["initialized"]:
@@ -58,8 +59,6 @@ class SyncService:
         ok, out = git.stage_all()
         if not ok:
             raise SyncError(tr("暂存文件失败", "Failed to stage files"), out)
-        # changelog.md 仅用于 Release 发布，不进入 Git 历史
-        git.exclude_from_index("changelog.md")
 
         updated_items = self._collect_updated_items()
         committed = 0
@@ -107,7 +106,7 @@ class SyncService:
             if " -> " in path:
                 path = path.split(" -> ")[-1].strip().strip('"')
             top = path.replace("\\", "/").split("/")[0]
-            if not top or top == "changelog.md":
+            if not top:
                 continue
             items[top] = "D" if status_char == "D" else "A"
         return items

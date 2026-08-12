@@ -133,6 +133,38 @@ def test_push_view_failure_marks_error():
     assert "[✕]" in painted[-1]
 
 
+def test_push_view_changelog_bottomed_with_gap():
+    """changelog.md 置底且前置一空行（列表还有其他文件时）。"""
+    svc, view, _ = _make_push_view(initialized=True, remote="x",
+                                   files={"a.py": "1", "changelog.md": "2"})
+    view.activate()
+    lines = view.render().split("\n")
+    assert lines[-1] == "[~] changelog.md"
+    assert lines[-2] == ""                       # 与其他文件空一行
+    assert "[~] a.py" in lines                   # 其余文件保持在上方
+
+
+def test_push_view_changelog_alone_no_gap():
+    """仅 changelog.md 一个待推文件时不插空行。"""
+    svc, view, _ = _make_push_view(initialized=True, remote="x",
+                                   files={"changelog.md": "1"})
+    view.activate()
+    assert view.render().split("\n") == ["[~] changelog.md"]
+
+
+def test_push_view_changelog_bottomed_in_progress():
+    """推送状态行（[·]/[✓]）同样保持 changelog.md 置底 + 空行。"""
+    svc, view, painted = _make_push_view(initialized=True, remote="x",
+                                         files={"a.py": "1", "changelog.md": "2"})
+    view.activate()
+    view.handle_key(KEY_ENTER)
+    assert "[·]" in painted[0]
+    final = painted[-1].split("\n")
+    assert final[-1] == "[✓] changelog.md"
+    assert final[-2] == ""
+    assert "[✓] a.py" in final
+
+
 # ── PullView ──
 from tui.pull_view import PullView
 

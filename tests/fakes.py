@@ -23,7 +23,7 @@ class FakeGitProvider:
         self.tracked: set[str] = set()
         self.staged: set[str] = set()
         self.commits: list[str] = []
-        self.gitignore_lines: list[str] = ["__pycache__/", "changelog.md"]
+        self.gitignore_lines: list[str] = ["__pycache__/"]
         self.fail_mode = "ok"       # ok | repo_not_found | rejected | network
         self.force_push_calls = 0
         self.force_fail = False     # True 时强推也失败（模拟分支保护）
@@ -60,7 +60,7 @@ class FakeGitProvider:
 
     def create_ignore(self) -> None:
         if not self.has_gitignore():
-            self.gitignore_lines = ["__pycache__/", "changelog.md"]
+            self.gitignore_lines = ["__pycache__/"]
 
     def ensure_gitignore_entry(self, entry: str) -> None:
         if entry not in self.gitignore_lines:

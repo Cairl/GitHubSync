@@ -28,6 +28,26 @@ _CHANGE_COLOR = {"A": COLOR_SUCCESS_SOFT, "M": COLOR_WARN, "D": COLOR_ERROR}
 _PUSH_COLOR = {"·": COLOR_PUSH_PENDING, "✓": COLOR_SUCCESS_SOFT, "✕": COLOR_ERROR}
 
 
+def _is_changelog_row(row: str) -> bool:
+    """format_diff 行是否为根目录 changelog.md（"L  changelog.md"）。"""
+    return len(row) >= 3 and row[1] == " " and row[3:] == "changelog.md"
+
+
+def _changelog_bottom(rows: list[str]) -> list[str]:
+    """changelog.md 行置底并前置一空行（仅当列表还有其他行）。
+
+    rows 为 format_diff 原始行（"L  path"）；空行以 "" 表示，由渲染与
+    推送状态两条路径各自处理。无 changelog.md 或仅剩它时原样返回。
+    """
+    if not rows:
+        return rows
+    changelog = [r for r in rows if _is_changelog_row(r)]
+    rest = [r for r in rows if not _is_changelog_row(r)]
+    if not changelog or not rest:
+        return rows
+    return rest + [""] + changelog
+
+
 class PushView(ViewBase):
     """推送标签页。结果锁定期间 activate/invalidate 均不重扫（render 持续输出结果）。"""
 
@@ -90,11 +110,11 @@ class PushView(ViewBase):
         """文件级变化列表，符号标记（[+]/[~]/[-]）按语义着色，文件名纯文本。
 
         符号单独经 markup 着色，文件名保持纯文本（防止仓库文件名中的方括号
-        被 markup 误解析）。
+        被 markup 误解析）。changelog.md 置底并前置空行。
         """
         from core.status import format_diff
         lines = []
-        for line in format_diff(self.git.get_porcelain()):
+        for line in _changelog_bottom(format_diff(self.git.get_porcelain())):
             if len(line) >= 3 and line[1] == " ":
                 label = _CHANGE_CN.get(line[0], line[0])
                 color = _CHANGE_COLOR.get(line[0])
@@ -109,16 +129,26 @@ class PushView(ViewBase):
         """推送状态行：[·]/[✓]/[✕] 按语义着色；方括号反斜杠转义防 markup 误解析。"""
         lines = []
         for path in self._push_paths:
+            if not path:
+                lines.append("")
+                continue
             sym = (self._push_state or {}).get(path, "·")
             label = markup_to_ansi(f"[{_PUSH_COLOR[sym]}]\\[{sym}][/]")
             lines.append(f"{label} {path}")
         return lines
 
     def _begin_push(self) -> list[str]:
-        """渲染 [·] 视图（零 fetch，Enter 一瞬反馈）；返回待推路径（空=无可推）。"""
+        """渲染 [·] 视图（零 fetch，Enter 一瞬反馈）；返回待推路径（空=无可推）。
+
+        changelog.md 置底，保留空行标记（""）以维持与清单一致的分隔。
+        """
         from core.status import format_diff
-        paths = [line[3:] for line in format_diff(self.git.get_porcelain())
-                 if len(line) >= 3 and line[1] == " "]
+        paths = []
+        for line in _changelog_bottom(format_diff(self.git.get_porcelain())):
+            if not line:
+                paths.append("")
+            elif len(line) >= 3 and line[1] == " ":
+                paths.append(line[3:])
         info = self._get_info()
         if not paths and info.ahead > 0:
             # AHEAD 且工作区干净：占位行表达推送本地提交，否则推送期间界面空白

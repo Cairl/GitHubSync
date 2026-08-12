@@ -8,7 +8,7 @@ from .command import DEFAULT_TIMEOUT, run_command
 # 创建仓库时的默认 .gitignore 内容
 _DEFAULT_GITIGNORE = (
     "__pycache__/\n*.pyc\n.env\n.DS_Store\n.vscode/\n.idea/\n"
-    "dist/\nbuild/\n*.spec\nvenv/\nrun_sync.bat\nchangelog.md\n"
+    "dist/\nbuild/\n*.spec\nvenv/\nrun_sync.bat\n"
 )
 
 
