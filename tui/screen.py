@@ -8,7 +8,8 @@ from __future__ import annotations
 import re
 
 from core.config import (COLOR_BRANCH_NAME, COLOR_LABEL, COLOR_MENU_ACTIVE_BG,
-                         COLOR_MENU_ACTIVE_FG, COLOR_MENU_BG, COLOR_URL)
+                         COLOR_MENU_ACTIVE_FG, COLOR_MENU_BG, COLOR_SUCCESS,
+                         COLOR_URL)
 from core.i18n import tr
 from core.status import RepoInfo, RepoStatus
 from core.utils import get_display_width
@@ -130,7 +131,7 @@ def _top_line(info: RepoInfo, project_name: str,
         tag = release_tag or "-"
         releases_url = _strip_git_suffix(info.remote_url) + "/releases"
         lines.append(f"  [{COLOR_LABEL}]{tr('版本: ', 'Version: ')}[/]"
-                     f"[link {releases_url} {COLOR_URL}]{tag}[/]")
+                     f"[link {releases_url} {COLOR_SUCCESS}]{tag}[/]")
     return "\n".join(lines)
 
 

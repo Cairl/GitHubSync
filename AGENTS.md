@@ -5,7 +5,7 @@
 GitHubSync 是一个 Windows 终端同步工具，将本地目录同步到 GitHub 仓库。基于 `git` 和 `gh` CLI 实现全部操作，提供 CLI 子命令与极简交互两种形态（CLI-first）。
 - **CLI 子命令**：`status` / `push` / `restore` / `diff` / `info` / `switch`，POSIX 输出契约（结果走 stdout、诊断走 stderr、isatty 着色、退出码 0/1/2/3）
 - **极简交互**：无子命令 + tty 时进入，顶栏常驻 + 内容区刷新，标签页单循环（`tui/interactive.py`）
-- **Release 发布**：检测到 `changelog.md` 时自动发布 GitHub Release（YYwWWa 版本号），发布成功后删除该文件；changelog.md 被 .gitignore 隔离，永不入库
+- **Release 发布**：检测到 `changelog.md` 时自动发布 GitHub Release（YYwWWa 版本号）。changelog.md 随本次推送入库（推送列表可见），发布成功后删除本地文件，下次同步提交删除并推送清掉远端
 - **自动创建仓库**、自动配置远程；推送 = 本地 1:1 覆盖远程当前分支（分叉自动强推；仅建仓初始化时改名一次 main，此后同步不动分支名），拉取 = 远程 1:1 复刻本地（reset + clean）
 
 - **语言**: Python 3.12+

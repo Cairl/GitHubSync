@@ -79,7 +79,7 @@ def test_render_header_shows_release_version():
     out = render_header(
         _info(RepoStatus.CHANGED, remote_url="https://github.com/Cairl/GitHubSync.git"),
         "GitHubSync", release_tag="26w32a")
-    assert "[link https://github.com/Cairl/GitHubSync/releases #F6E2B7]26w32a[/]" in out
+    assert "[link https://github.com/Cairl/GitHubSync/releases #3FB950]26w32a[/]" in out
     assert "Version: 26w32a" in _strip_markup(out)
     # 无远程：无主页行也无版本行
     out_no_remote = _strip_markup(render_header(
