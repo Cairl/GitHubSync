@@ -95,7 +95,8 @@ class PushView(ViewBase):
     def render(self) -> str:
         if self._push_state is not None:
             return "\n".join(self._render_push_lines())
-        return "\n".join(self._lines)
+        # 无待推内容（clean 且无 ahead 且无 changelog）时用 none 占位
+        return "\n".join(self._lines) or "none"
 
     # ── 键处理 ──
     def handle_key(self, key: bytes) -> list[str]:

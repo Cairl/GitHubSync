@@ -251,10 +251,17 @@ def test_pull_view_enter_restores_commit():
     assert svc.git.reset_to == "abcdef1234567890"
 
 
+def test_push_view_empty_clean_shows_none():
+    """工作区干净、无 ahead、无 changelog：推送页渲染 none 占位。"""
+    svc, view, _ = _make_push_view(initialized=True, remote="x")
+    view.activate()
+    assert view.render() == "none"
+
+
 def test_pull_view_no_commits():
     svc, view = _make_pull_view(initialized=True, remote="x", commits=[])
     view.activate()
-    assert view.render() == "No commits."
+    assert view.render() == "none"
     assert view.handle_key(KEY_ENTER) == []   # 空列表键全 no-op
 
 
@@ -330,7 +337,7 @@ def test_files_view_failed_marker(tmp_path):
 def test_files_view_empty_shows_hint(tmp_path):
     svc, view = _make_files_view(tmp_path)
     view.activate()
-    assert view.render() == "No files."
+    assert view.render() == "none"
     assert view.handle_key(KEY_ENTER) == []
 
 
@@ -352,6 +359,14 @@ def _make_branch_view(**git_kw):
     svc = make_services(initialized=True, remote="x", **git_kw)
     view = BranchView(svc.branch, svc.git, max_rows=lambda: 20)
     return svc, view
+
+
+def test_branch_view_empty_shows_none():
+    """无本地分支：分支页渲染 none 占位，键全 no-op。"""
+    svc, view = _make_branch_view(branches=[])
+    view.activate()
+    assert view.render() == "none"
+    assert view.handle_key(KEY_ENTER) == []
 
 
 def test_branch_view_lazy_load():

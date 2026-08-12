@@ -11,7 +11,6 @@ from typing import Callable
 
 from core.config import (COLOR_CYAN, COLOR_MENU_ACTIVE_BG, KEY_DOWN,
                          KEY_ENTER, KEY_UP)
-from core.i18n import tr
 from core.protocols import GitProvider
 from core.restore_service import RestoreService
 
@@ -43,7 +42,7 @@ class PullView(ViewBase):
 
     def render(self) -> str:
         if not self._items:
-            return markup_to_ansi(tr("没有提交历史。", "No commits."))
+            return "none"  # 无提交历史占位
         # 窗口滚动：只渲染选中项附近若干条，防止列表超屏触发终端滚动
         visible = max(3, min(self._max_rows() - 1, len(self._items)))
         half = visible // 2

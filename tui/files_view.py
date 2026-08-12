@@ -96,7 +96,7 @@ class FilesView(ViewBase):
 
     def render(self) -> str:
         if not self._items:
-            return markup_to_ansi(tr("没有文件。", "No files."))
+            return "none"  # 无文件占位
         # 按钮列：已忽略 → 「推送」（Enter 纳入同步），未忽略 → 「忽略」（Enter 排除）
         push_text = tr("推送", "Push")
         ignore_text = tr("忽略", "Ignore")

@@ -59,7 +59,7 @@ class BranchView(ViewBase):
     def render(self) -> str:
         rows = self._rows()
         if not rows:
-            return markup_to_ansi(tr("没有本地分支。", "No local branches."))
+            return "none"  # 无分支占位
         # 窗口滚动（与拉取页同款）：防止列表超屏触发终端滚动
         visible = max(3, min(self._max_rows() - 1, len(rows)))
         half = visible // 2
