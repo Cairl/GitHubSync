@@ -35,12 +35,23 @@ class ViewBase:
         if self._loaded or self._loading:
             return
         self._loading = True
-        self._executor.submit(self._load, self._load_done)
+        self._executor.submit(self._load_guard, self._load_done)
 
-    def _load_done(self, _result) -> None:
-        """后台加载完成：置缓存标记并通知主循环（回调须线程安全）。"""
+    def _load_guard(self) -> bool:
+        """加载探针：_load 正常完成返回 True；异常经 executor 契约降级为 None
+        （callback(None)），_load_done 据此区分成败——_load 本身恒返回 None。"""
+        self._load()
+        return True
+
+    def _load_done(self, result) -> None:
+        """后台加载完成：置缓存标记并通知主循环（回调须线程安全）。
+
+        result 为 None（_load 异常）时不置 _loaded：视图不缓存空数据，
+        下次 activate 自动重试；_loading 仍复位、on_loaded 仍触发。
+        """
         self._loading = False
-        self._loaded = True
+        if result is not None:
+            self._loaded = True
         if self._on_loaded:
             self._on_loaded()
 

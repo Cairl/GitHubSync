@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 
 from .command import register_command_hook
@@ -52,6 +53,9 @@ class FileLogger:
 
     def __init__(self, path: str | None = None):
         self.path = path or default_log_path()
+        # StatusService 并行后命令钩子从多个 worker 线程并发触发，
+        # 写入与轮转检查必须串行化，否则日志行交错、轮转检查竞态
+        self._lock = threading.Lock()
         self._prepare()
 
     def _prepare(self) -> None:
@@ -72,9 +76,10 @@ class FileLogger:
     def log(self, level: str, message: str) -> None:
         """追加一行 `时间 [级别] 消息`；写失败静默（调试日志不阻塞业务）。"""
         try:
-            self._maybe_rotate()
-            with open(self.path, "a", encoding="utf-8") as f:
-                f.write(f"{_now()} [{level}] {message}\n")
+            with self._lock:
+                self._maybe_rotate()
+                with open(self.path, "a", encoding="utf-8") as f:
+                    f.write(f"{_now()} [{level}] {message}\n")
         except OSError:
             pass
 

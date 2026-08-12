@@ -659,3 +659,23 @@ def test_skeleton_painted_before_status_loaded():
     assert "branch:" not in first       # 骨架期状态行留白
     assert "Home:" not in first         # 骨架期主页/版本行不渲染
     assert "branch: main" in "\n".join(out_lines)  # 状态到达后补全
+
+
+def test_run_shutdowns_executor_on_exit():
+    """run() 退出（含异常路径）必须 shutdown executor，释放后台线程池。"""
+    from core.executor import InlineExecutor
+
+    class RecordingExecutor(InlineExecutor):
+        def __init__(self):
+            self.shutdown_calls = 0
+
+        def shutdown(self):
+            self.shutdown_calls += 1
+
+    svc = make_services(initialized=True, remote="x")
+    ex = RecordingExecutor()
+    app = InteractiveApp(svc, "fake_repo", key_source=scripted([]),
+                         out=lambda s: None, executor=ex)
+    with pytest.raises(StopIteration):
+        app.run()
+    assert ex.shutdown_calls == 1

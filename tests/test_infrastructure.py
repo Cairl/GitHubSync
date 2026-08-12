@@ -278,6 +278,28 @@ def test_file_logger_write_failure_silent(tmp_path):
     logger.log("X", "msg")  # 不抛
 
 
+def test_file_logger_concurrent_writes_not_interleaved(tmp_path):
+    """多线程并发写（并行命令钩子场景）：行数完整且无交错行。"""
+    import re
+    import threading
+    from core.file_logger import FileLogger
+    p = tmp_path / "debug.log"
+    logger = FileLogger(str(p))
+    threads = [threading.Thread(
+        target=lambda t=t: [logger.log("CMD OK", f"worker-{t}-line-{i}")
+                            for i in range(50)])
+        for t in range(8)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    lines = p.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 8 * 50
+    pattern = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} "
+                         r"\[CMD OK\] worker-\d-line-\d+$")
+    assert all(pattern.match(ln) for ln in lines)  # 无交错/截断行
+
+
 def test_file_logger_defaults_to_session_file(monkeypatch, tmp_path):
     """未传 path 时在统一日志目录生成会话文件（githubsync-<时间戳>.log）。"""
     import os

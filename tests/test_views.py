@@ -38,6 +38,45 @@ def test_activate_loads_once_then_cache_hits():
     assert v.loads == 2          # 失效后重扫
 
 
+def test_activate_retries_after_load_failure():
+    """_load 异常（executor 契约降级 callback(None)）：不置 _loaded，下次 activate 自动重试。"""
+    from tui.view_base import ViewBase
+
+    class Flaky(ViewBase):
+        id = "flaky"
+
+        def __init__(self):
+            super().__init__()
+            self.loads = 0
+            self.fail = True
+            self.notified = 0
+            self._on_loaded = lambda: setattr(self, "notified", self.notified + 1)
+
+        def _load(self):
+            self.loads += 1
+            if self.fail:
+                raise RuntimeError("boom")
+
+        def _render(self):
+            return "x"
+
+        def handle_key(self, key):
+            return []
+
+    v = Flaky()
+    v.activate()
+    assert v.loads == 1
+    assert v._loaded is False and v._loading is False  # 失败不缓存空数据
+    assert v.notified == 1                             # on_loaded 仍触发
+    v.activate()                                       # 立即重试（未缓存）
+    assert v.loads == 2
+    v.fail = False
+    v.activate()
+    assert v.loads == 3 and v._loaded is True          # 恢复后正常缓存
+    v.activate()
+    assert v.loads == 3                                # 缓存命中零扫描
+
+
 # ── PushView ──
 from core.config import KEY_DOWN, KEY_ENTER, KEY_UP
 from tui.push_view import PushView

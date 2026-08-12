@@ -221,6 +221,9 @@ class InteractiveApp:
             return self._run()
         finally:
             show_cursor()  # 无论正常退出还是异常，恢复光标避免终端光标消失
+            # 停掉后台线程池（wait=False：不阻塞退出，仅阻止新任务并被
+            # GC/atexit 快速回收）；InlineExecutor.shutdown 是 no-op
+            self._executor.shutdown()
 
     def _run(self) -> int:
         # 首帧立即渲染骨架（零 I/O）；git 状态与 gh 版本号后台加载

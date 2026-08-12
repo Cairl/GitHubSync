@@ -11,10 +11,12 @@ from .status import (RepoInfo, RepoStatus, changelog_pending, decide_status,
 class StatusService:
     """组合 porcelain / fetch / ahead_behind 计算 RepoInfo。
 
-    只读调用（remote_url / ahead_behind_upstream / porcelain / fetch）一波
-    并行：git 子进程逐个约 70ms，串行 4 个约 300ms，并行后约 80ms。
-    fetch 写 refs、porcelain 读工作区，无锁冲突；remote 缺失时 fetch 失败
-    静默降级（fetch 只读，失败不影响本地状态判定）。
+    fetch 只与纯本地读（remote_url / porcelain）一波并行：refs 在 fetch
+    末尾才更新，ahead_behind_upstream 必须在 fetch 完成后执行，否则
+    rev-list 读到旧 refs，远程有新提交时误报 CLEAN/AHEAD（破坏 CLI
+    输出契约与退出码）。fetch=False（TUI 启动路径）无此依赖，remote /
+    porcelain / ahead_behind 三调用保持一波并行。remote 缺失时 fetch
+    失败静默降级（fetch 只读，失败不影响本地状态判定）。
     """
 
     def __init__(self, git: GitProvider, repo_path: str):
@@ -38,19 +40,23 @@ class StatusService:
         with ThreadPoolExecutor(max_workers=4) as ex:
             f_remote = ex.submit(self.git.remote_url)
             f_porcelain = ex.submit(self.git.get_porcelain)
-            f_ab = ex.submit(self.git.ahead_behind_upstream)
             f_fetch = ex.submit(self.git.fetch) if fetch else None
+            # fetch=True：ahead/behind 依赖 fetch 后的最新 refs，串行等待；
+            # fetch=False：无顺序依赖，与本地读同波并行
+            f_ab = ex.submit(self.git.ahead_behind_upstream) if not fetch else None
             remote = f_remote.result()
             if not remote:
                 return RepoInfo(status=RepoStatus.NO_REMOTE, branch=branch,
                                 path=self.repo_path)
+            if f_fetch is not None:
+                f_fetch.result()  # 只读；失败静默降级为本地状态
+                ab = self.git.ahead_behind_upstream()
+            else:
+                ab = f_ab.result()
             ahead, behind = 0, 0
-            ab = f_ab.result()
             if ab:
                 ahead, behind = ab
             added, modified, deleted = parse_porcelain(f_porcelain.result())
-            if f_fetch is not None:
-                f_fetch.result()  # 只读；失败静默降级为本地状态
         status = decide_status(ahead=ahead, behind=behind,
                                changes=added + modified + deleted)
         return RepoInfo(status=status, branch=branch, path=self.repo_path,
