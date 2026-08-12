@@ -1,6 +1,7 @@
 """仓库状态模型：CLI 与交互模式的统一状态语言。"""
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from enum import Enum, auto
 
@@ -32,6 +33,7 @@ class RepoInfo:
     behind: int = 0
     remote_url: str | None = None
     error: str | None = None
+    release_pending: bool = False  # 本地存在非空 changelog.md（Release 待发布）
 
     @property
     def change_count(self) -> int:
@@ -98,3 +100,34 @@ def format_diff(porcelain: str) -> list[str]:
             path = path.split(" -> ")[-1].strip().strip('"')
         lines.append(f"{letter}  {path}")
     return lines
+
+
+def changelog_pending(repo_path: str) -> bool:
+    """本地存在非空 changelog.md（Release 待发布）。
+
+    与 ReleaseService.maybe_publish 的触发条件一致（存在 + 非空）；
+    changelog.md 被 gitignore 隔离，porcelain 不可见，需独立探测。
+    """
+    try:
+        return os.path.getsize(os.path.join(repo_path, "changelog.md")) > 0
+    except OSError:
+        return False
+
+
+def _is_changelog_row(row: str) -> bool:
+    """format_diff 行是否为根目录 changelog.md（"X  changelog.md"）。"""
+    return len(row) >= 3 and row[1] == " " and row[3:] == "changelog.md"
+
+
+def append_local_changelog(rows: list[str], repo_path: str) -> list[str]:
+    """format_diff 行末尾追加 "A  changelog.md"（本地待发布且行中未列出）。
+
+    changelog.md 不入库（gitignore 隔离），推送列表通过此函数保持可见；
+    仅追加不置底，置底由调用方处理。行中已含 changelog（如用户手动纳入
+    同步）时不重复追加。
+    """
+    if any(_is_changelog_row(r) for r in rows):
+        return rows
+    if not changelog_pending(repo_path):
+        return rows
+    return rows + ["A  changelog.md"]

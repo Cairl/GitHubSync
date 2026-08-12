@@ -35,6 +35,9 @@ def recommended_action(info: RepoInfo) -> tuple[str, str]:
     if info.status in (RepoStatus.CHANGED, RepoStatus.AHEAD,
                        RepoStatus.NO_REPO, RepoStatus.NO_REMOTE):
         return "push", tr("推送", "Push")
+    if info.release_pending and info.status == RepoStatus.CLEAN:
+        # 工作区干净但本地有非空 changelog.md（Release 待发布，不入库）
+        return "push", tr("推送", "Push")
     if info.status == RepoStatus.BEHIND:
         return "restore_remote", tr("对齐远程", "Restore")
     if info.status == RepoStatus.DIVERGED:
@@ -43,11 +46,12 @@ def recommended_action(info: RepoInfo) -> tuple[str, str]:
 
 
 def _has_sync(info: RepoInfo, item_id: str) -> bool:
-    """菜单项是否有待处理同步：推送 = 有待推变更，拉取 = 有新提交（分叉两者都有）。"""
+    """菜单项是否有待处理同步：推送 = 有待推变更或 Release 待发布，拉取 = 有新提交（分叉两者都有）。"""
     if item_id == "push":
-        return info.status in (RepoStatus.CHANGED, RepoStatus.AHEAD,
-                               RepoStatus.NO_REPO, RepoStatus.NO_REMOTE,
-                               RepoStatus.DIVERGED)
+        return (info.status in (RepoStatus.CHANGED, RepoStatus.AHEAD,
+                                RepoStatus.NO_REPO, RepoStatus.NO_REMOTE,
+                                RepoStatus.DIVERGED)
+                or (info.release_pending and info.status == RepoStatus.CLEAN))
     if item_id == "pull":
         return info.status in (RepoStatus.BEHIND, RepoStatus.DIVERGED)
     return False

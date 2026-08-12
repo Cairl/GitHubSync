@@ -60,8 +60,8 @@ def test_sync_no_changes(tmp_path):
     assert result.pushed is True
 
 
-def test_sync_changelog_pushed_then_published_and_deleted(tmp_path):
-    """changelog.md 存在时：随本次推送入库显示，发布 Release 后删除本地，下次同步推送删除。"""
+def test_sync_changelog_published_but_not_tracked(tmp_path):
+    """changelog.md 存在时：发布 Release，但 gitignore 隔离、不入库、不计变更项。"""
     sync, git, gh, bus, _ = make_services(str(tmp_path))
     git.init_repo()
     git.remote = "https://github.com/octocat/repo"
@@ -75,15 +75,15 @@ def test_sync_changelog_pushed_then_published_and_deleted(tmp_path):
 
     assert gh.published                              # 已发布 Release
     assert not os.path.exists(changelog_path)        # 发布后删除本地文件
-    assert "changelog.md" not in git.gitignore_lines  # 不再隔离
-    assert "changelog.md" in git.tracked             # 已入库（本次推送显示）
-    assert "changelog.md" in result.updated_items    # 计入变更项
+    assert "changelog.md" in git.gitignore_lines     # gitignore 隔离（不入库）
+    assert "changelog.md" not in git.tracked         # 不入库、不上远程
+    assert "changelog.md" not in result.updated_items  # 不计入变更项
     assert "a.txt" in git.tracked
     assert result.committed == 1
 
 
-def test_sync_second_run_commits_changelog_deletion(tmp_path):
-    """发布后的 changelog.md 删除在下次同步被提交并推送（远端清掉残留）。"""
+def test_sync_changelog_never_tracked_across_runs(tmp_path):
+    """changelog.md 从未入库：发布删除后下次同步无删除提交、无 changelog 痕迹。"""
     sync, git, gh, bus, _ = make_services(str(tmp_path))
     git.init_repo()
     git.remote = "https://github.com/octocat/repo"
@@ -96,20 +96,19 @@ def test_sync_second_run_commits_changelog_deletion(tmp_path):
     first = sync.run()
     assert gh.published                             # 首次发布 Release
     assert not os.path.exists(changelog_path)       # 发布后本地删除
-    assert "changelog.md" in git.tracked            # 首次已入库
+    assert "changelog.md" not in git.tracked        # 从未入库
 
     # 模拟发布后的工作区状态：内存工作区同步删除 changelog.md（fakes 与磁盘不同步）
     del git.files["changelog.md"]
     second = sync.run()
 
-    assert "changelog.md" not in git.tracked        # 删除已提交（tracked 移除）
-    assert second.committed == 1
-    assert second.updated_items == {"changelog.md": "D"}  # 计入删除项
-    assert not git.staged                           # 暂存已清空
+    assert second.committed == 0                    # 无删除提交
+    assert second.updated_items == {}               # 无 changelog 痕迹
+    assert "changelog.md" not in git.tracked
 
 
 def test_sync_changelog_publish_failure_keeps_local(tmp_path):
-    """发布失败：文件保留本地且已入库，同步仍成功。"""
+    """发布失败：文件保留本地且仍 gitignore 隔离（不入库），同步仍成功。"""
     sync, git, gh, bus, _ = make_services(str(tmp_path))
     git.init_repo()
     git.remote = "https://github.com/octocat/repo"
@@ -123,9 +122,33 @@ def test_sync_changelog_publish_failure_keeps_local(tmp_path):
     result = sync.run()
 
     assert os.path.exists(changelog_path)            # 文件保留待重试
-    assert "changelog.md" not in git.gitignore_lines  # 不再隔离
-    assert "changelog.md" in git.tracked             # 已入库推送
+    assert "changelog.md" in git.gitignore_lines     # 仍 gitignore 隔离
+    assert "changelog.md" not in git.tracked         # 不入库
     assert result.pushed is True                     # 其余文件正常推送
+
+
+def test_sync_untracks_legacy_tracked_changelog(tmp_path):
+    """旧版已入库的 changelog.md：首次同步自动停止跟踪（保留本地），推送清远端。"""
+    sync, git, gh, bus, _ = make_services(str(tmp_path))
+    git.init_repo()
+    git.remote = "https://github.com/octocat/repo"
+    git.files["a.txt"] = "hello"
+    git.tracked.add("a.txt")
+    # 模拟历史残留：changelog.md 已被 git 跟踪且本地文件存在
+    git.files["changelog.md"] = "- 优化同步流程"
+    git.tracked.add("changelog.md")
+    changelog_path = os.path.join(str(tmp_path), "changelog.md")
+    with open(changelog_path, "w", encoding="utf-8") as f:
+        f.write("- 优化同步流程")
+
+    result = sync.run()
+
+    assert "changelog.md" not in git.tracked        # 已停止跟踪
+    assert "changelog.md" in git.gitignore_lines     # 已加入 gitignore
+    assert result.updated_items == {"changelog.md": "D"}  # 本次推送删除远端
+    assert gh.published                              # Release 照常发布
+    assert not os.path.exists(changelog_path)        # 发布后本地删除
+    assert result.committed == 1
 
 
 def test_sync_repo_not_found_recovers(tmp_path):

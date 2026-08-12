@@ -176,6 +176,32 @@ def test_push_view_changelog_bottomed_in_progress():
     assert "[✓] a.py" in final
 
 
+def test_push_view_injects_local_changelog(tmp_path):
+    """gitignore 隔离后 porcelain 无 changelog 行：本地存在时注入显示（置底）。"""
+    svc, view, _ = _make_push_view(initialized=True, remote="x",
+                                   files={"a.py": "1"})
+    svc.git.gitignore_lines = ["__pycache__/", "changelog.md"]
+    svc.sync.repo_path = str(tmp_path)
+    (tmp_path / "changelog.md").write_text("release notes", encoding="utf-8")
+    view.activate()
+    lines = view.render().split("\n")
+    assert lines[-1] == "[+] changelog.md"   # 注入行（A → [+]）置底
+    assert lines[-2] == ""                    # 与其他文件空一行
+    assert "[~] a.py" in lines
+
+
+def test_push_view_clean_tree_with_changelog_can_push(tmp_path):
+    """工作区干净 + 本地 changelog 待发布：列表显示 changelog，Enter 推送发布。"""
+    svc, view, painted = _make_push_view(initialized=True, remote="x")
+    svc.sync.repo_path = str(tmp_path)
+    (tmp_path / "changelog.md").write_text("notes", encoding="utf-8")
+    view.activate()
+    assert view.render().split("\n")[-1] == "[+] changelog.md"
+    view.handle_key(KEY_ENTER)
+    assert "[✓] changelog.md" in painted[-1]
+    assert view._push_result is True
+
+
 # ── PullView ──
 from tui.pull_view import PullView
 

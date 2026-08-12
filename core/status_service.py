@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from .protocols import GitProvider
-from .status import RepoInfo, RepoStatus, decide_status, parse_porcelain
+from .status import (RepoInfo, RepoStatus, changelog_pending, decide_status,
+                     parse_porcelain)
 
 
 class StatusService:
@@ -41,4 +42,5 @@ class StatusService:
                                changes=added + modified + deleted)
         return RepoInfo(status=status, branch=branch, path=self.repo_path,
                         added=added, modified=modified, deleted=deleted,
-                        ahead=ahead, behind=behind, remote_url=remote)
+                        ahead=ahead, behind=behind, remote_url=remote,
+                        release_pending=changelog_pending(self.repo_path))

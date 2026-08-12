@@ -40,8 +40,9 @@ class SyncService:
     def _run(self) -> SyncCompleted:
         git = self.git
         git.create_ignore()
-        # changelog.md 入库：清理旧版 gitignore 残留，使其出现在推送列表（旧版"不入库"残留条目被修正为移除）
-        git.remove_from_gitignore_file("changelog.md")
+        # changelog.md 不入库：gitignore 隔离新文件（Release 仍读本地文件发布，
+        # 见下方 maybe_publish）；历史已入库的残留由 stage 后 rm_cached 清理
+        git.ensure_gitignore_entry("changelog.md")
 
         st = git.get_status()
         if not st["initialized"]:
@@ -60,6 +61,11 @@ class SyncService:
         if not ok:
             raise SyncError(tr("暂存文件失败", "Failed to stage files"), out)
 
+        # 已跟踪的 changelog.md（旧版入库残留）：从索引移除（本地文件保留），
+        # 本次提交删除并推送，远端清掉残留；从未跟踪/已清理的仓库此检查跳过
+        if git.is_tracked("changelog.md"):
+            git.rm_cached("changelog.md")
+
         updated_items = self._collect_updated_items()
         committed = 0
         if updated_items:
@@ -73,8 +79,8 @@ class SyncService:
         self._push_with_recovery()
         self.bus.publish(ActionLog("DONE", tr("推送完成", "Push completed")))
 
-        # 推送后发布 Release：changelog.md 已随本次推送入库；发布成功删除本地文件，
-        # 下次同步提交删除并推送，远端不留残留
+        # 推送后发布 Release：从本地读取 changelog.md 内容发布；
+        # changelog.md 不入库（gitignore 隔离），远端无残留，无需提交删除
         self.release.maybe_publish()
 
         result = SyncCompleted(pushed=True, committed=committed,

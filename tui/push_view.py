@@ -14,7 +14,8 @@ from core.config import (COLOR_ERROR, COLOR_PUSH_PENDING, COLOR_SUCCESS_SOFT,
 from core.exceptions import SyncError
 from core.i18n import tr
 from core.protocols import GitProvider
-from core.status import RepoInfo
+from core.status import (RepoInfo, append_local_changelog, changelog_pending,
+                         format_diff)
 from core.sync_service import SyncService
 
 from .renderer import markup_to_ansi
@@ -112,6 +113,16 @@ class PushView(ViewBase):
         return ["pull"]  # 提交历史已变
 
     # ── 内部 ──
+    def _changelog_rows(self) -> list[str]:
+        """porcelain format_diff 行 + 本地 changelog 注入 + 置底。
+
+        changelog.md 不入库（gitignore 隔离），porcelain 无行；本地存在
+        非空 changelog.md 时由 append_local_changelog 注入显示（Release
+        待发布提示），并经 _changelog_bottom 置底 + 前置空行。
+        """
+        return _changelog_bottom(append_local_changelog(
+            format_diff(self.git.get_porcelain()), self.sync.repo_path))
+
     def _ahead_files(self) -> list[tuple[str, str]]:
         """本地领先提交涉及的文件 [(状态字母, 路径)]；查询失败返回空。"""
         branch = self.git.current_branch()
@@ -130,9 +141,8 @@ class PushView(ViewBase):
         符号单独经 markup 着色，文件名保持纯文本（防止仓库文件名中的方括号
         被 markup 误解析）。changelog.md 置底并前置空行。
         """
-        from core.status import format_diff
         lines = []
-        for line in _changelog_bottom(format_diff(self.git.get_porcelain())):
+        for line in self._changelog_rows():
             if len(line) >= 3 and line[1] == " ":
                 label = _CHANGE_CN.get(line[0], line[0])
                 color = _CHANGE_COLOR.get(line[0])
@@ -151,6 +161,10 @@ class PushView(ViewBase):
                     label = markup_to_ansi(f"[{color}]{label}[/]")
                 ahead_lines.append(f"{label} {path}")
             lines = ahead_lines or [_ahead_placeholder(self._get_info().ahead)]
+            # 本地 changelog 待发布：AHEAD 干净场景同样显示（不入库仅展示）
+            if changelog_pending(self.sync.repo_path) and not any(
+                    "changelog.md" in line for line in lines):
+                lines = _changelog_bottom(lines + ["A  changelog.md"])
         return lines
 
     def _render_push_lines(self) -> list[str]:
@@ -168,11 +182,11 @@ class PushView(ViewBase):
     def _begin_push(self) -> list[str]:
         """渲染 [·] 视图（零 fetch，Enter 一瞬反馈）；返回待推路径（空=无可推）。
 
-        changelog.md 置底，保留空行标记（""）以维持与清单一致的分隔。
+        changelog.md 置底，保留空行标记（""）以维持与清单一致的分隔；
+        本地待发布的 changelog.md（porcelain 干净）也纳入待推路径。
         """
-        from core.status import format_diff
         paths = []
-        for line in _changelog_bottom(format_diff(self.git.get_porcelain())):
+        for line in self._changelog_rows():
             if not line:
                 paths.append("")
             elif len(line) >= 3 and line[1] == " ":
@@ -183,6 +197,9 @@ class PushView(ViewBase):
             paths = [path for _status, path in self._ahead_files()]
             if not paths:
                 paths = [_ahead_placeholder(info.ahead)]
+        # 工作区干净 + 本地 changelog 待发布：纳入待推路径，Enter 发布 Release
+        if changelog_pending(self.sync.repo_path) and "changelog.md" not in paths:
+            paths.append("changelog.md")
         if paths:
             self._push_paths = paths
             self._push_state = {p: "·" for p in paths}

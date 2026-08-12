@@ -12,7 +12,7 @@ from core.events import ActionLog
 from core.exceptions import SyncError
 from core.i18n import tr
 from core.services import Services
-from core.status import RepoStatus, format_diff
+from core.status import RepoStatus, append_local_changelog, format_diff
 
 from .exit_codes import EXIT_CHANGES, EXIT_DIVERGED, EXIT_FAILED, EXIT_OK
 from .output import (echo, err, info_to_dict, print_action_log,
@@ -47,8 +47,9 @@ def cmd_status(args, svc: Services) -> int:
         print(json.dumps(info_to_dict(info), ensure_ascii=False))
     else:
         echo(status_markup(info), markup=True)
-        if args.verbose and info.change_count:
-            for line in format_diff(svc.git.get_porcelain()):
+        if args.verbose and (info.change_count or info.release_pending):
+            for line in append_local_changelog(
+                    format_diff(svc.git.get_porcelain()), svc.sync.repo_path):
                 echo(line)
     return _STATUS_EXIT.get(info.status, EXIT_FAILED)
 
@@ -117,7 +118,8 @@ def cmd_restore(args, svc: Services) -> int:
 
 
 def cmd_diff(args, svc: Services) -> int:
-    lines = format_diff(svc.git.get_porcelain())
+    lines = append_local_changelog(format_diff(svc.git.get_porcelain()),
+                                   svc.sync.repo_path)
     if not lines:
         err(tr("工作区干净。", "Working tree clean."))
         return EXIT_OK

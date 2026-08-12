@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import sys
 
@@ -24,6 +25,7 @@ class FakeGitProvider:
         self.staged: set[str] = set()
         self.commits: list[str] = []
         self.gitignore_lines: list[str] = ["__pycache__/"]
+        self.deleted_pending: set[str] = set()  # rm --cached 待提交删除（索引移除）
         self.fail_mode = "ok"       # ok | repo_not_found | rejected | network
         self.force_push_calls = 0
         self.force_fail = False     # True 时强推也失败（模拟分支保护）
@@ -85,9 +87,24 @@ class FakeGitProvider:
         self.tracked.discard(filename)
         self.staged.discard(filename)
 
+    def _gitignored(self, name: str) -> bool:
+        """未跟踪文件是否被 gitignore 条目命中（近似 git add . 的忽略行为）。"""
+        base = os.path.basename(name)
+        for entry in self.gitignore_lines:
+            e = entry.strip().rstrip("/")
+            if not e or e.startswith("#"):
+                continue
+            if (fnmatch.fnmatch(name, e) or fnmatch.fnmatch(base, e)
+                    or name.startswith(e + "/")):
+                return True
+        return False
+
     def stage_all(self) -> tuple[bool, str]:
-        # 与真实 git add . 一致：暂存新增与删除
-        self.staged = ((set(self.files) - self.tracked)
+        # 与真实 git add . 一致：gitignore 忽略的未跟踪文件不入暂存；
+        # 已跟踪文件不受 gitignore 影响
+        ignored = {f for f in set(self.files) - self.tracked
+                   if self._gitignored(f)}
+        self.staged = ((set(self.files) - self.tracked - ignored)
                        | (self.tracked - set(self.files)))
         return True, ""
 
@@ -102,6 +119,9 @@ class FakeGitProvider:
         return set(self.tracked)
 
     def rm_cached(self, filename: str) -> tuple[bool, str]:
+        # 模拟 git rm --cached：停止跟踪（本地保留）+ 暂存删除（提交后远端清除）
+        if filename in self.tracked:
+            self.deleted_pending.add(filename)
         self.tracked.discard(filename)
         return True, ""
 
@@ -114,7 +134,11 @@ class FakeGitProvider:
     def get_porcelain(self) -> str:
         self.porcelain_calls += 1
         lines = []
-        for f in sorted(set(self.files) - self.tracked):
+        for f in sorted(self.deleted_pending):
+            lines.append(f"D  {f}")  # 暂存区删除（rm --cached 后）
+        for f in sorted(set(self.files) - self.tracked - self.deleted_pending):
+            if self._gitignored(f):
+                continue  # gitignore 忽略的未跟踪文件不显示
             lines.append(f" M {f}")
         for f in sorted(self.tracked - set(self.files)):
             lines.append(f" D {f}")
@@ -131,8 +155,13 @@ class FakeGitProvider:
         return self.ahead_diff
 
     def commit(self, message: str) -> tuple[bool, str | None]:
-        if not self.staged:
+        if not self.staged and not self.deleted_pending:
             return False, None
+        # 先提交 rm --cached 的删除（文件仍在工作区，仅从索引移除）
+        for f in self.deleted_pending:
+            self.tracked.discard(f)
+            self.staged.discard(f)
+        self.deleted_pending.clear()
         for f in self.staged:
             if f in self.files:
                 self.tracked.add(f)

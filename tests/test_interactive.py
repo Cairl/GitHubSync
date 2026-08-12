@@ -39,6 +39,14 @@ def test_recommended_action_mapping():
     assert recommended_action(_info(RepoStatus.NO_REMOTE))[0] == "push"
 
 
+def test_recommended_action_release_pending():
+    """工作区干净但 Release 待发布：推荐推送（changelog.md 不入库但可见）。"""
+    assert recommended_action(
+        _info(RepoStatus.CLEAN, release_pending=True))[0] == "push"
+    assert recommended_action(
+        _info(RepoStatus.CLEAN, release_pending=True))[1] == "Push"
+
+
 def test_menu_for_action_mapping():
     """推荐动作 → 初始标签落点：push→推送，restore_remote→拉取，其余落推送。"""
     assert menu_for_action("push") == "push"

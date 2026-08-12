@@ -39,6 +39,35 @@ def test_status_no_repo():
     assert _svc(g).get_status().status == RepoStatus.NO_REPO
 
 
+def test_status_release_pending_with_changelog(tmp_path):
+    """本地存在非空 changelog.md：release_pending 为真（状态仍 CLEAN）。"""
+    g = FakeGitProvider()
+    g.init_repo()
+    g.remote = "https://github.com/octocat/repo"
+    (tmp_path / "changelog.md").write_text("notes", encoding="utf-8")
+    info = StatusService(g, str(tmp_path)).get_status(fetch=False)
+    assert info.release_pending is True
+    assert info.status == RepoStatus.CLEAN
+
+
+def test_status_release_not_pending_without_changelog(tmp_path):
+    g = FakeGitProvider()
+    g.init_repo()
+    g.remote = "https://github.com/octocat/repo"
+    info = StatusService(g, str(tmp_path)).get_status(fetch=False)
+    assert info.release_pending is False
+
+
+def test_status_release_not_pending_empty_changelog(tmp_path):
+    """空 changelog.md（0 字节）不算待发布：与 maybe_publish 触发条件一致。"""
+    g = FakeGitProvider()
+    g.init_repo()
+    g.remote = "https://github.com/octocat/repo"
+    (tmp_path / "changelog.md").write_text("", encoding="utf-8")
+    info = StatusService(g, str(tmp_path)).get_status(fetch=False)
+    assert info.release_pending is False
+
+
 def test_status_no_remote():
     g = FakeGitProvider()
     g.initialized = True
