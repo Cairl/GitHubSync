@@ -6,6 +6,7 @@
 
 - **CLI 子命令**：`status` / `push` / `restore` / `diff` / `info` / `switch`，支持 `--json` / `--yes` 等参数，退出码 0/1/2/3 语义化
 - **极简交互模式**：无子命令直接启动，顶栏常驻（项目 / 分支·状态 / 主页 / 版本 / 菜单），← → 切换标签页即显示内容（免 Enter）
+- **启动秒开**：交互模式首帧立即渲染骨架界面（不等任何 git/gh I/O），仓库状态、版本号与各标签页数据由后台线程异步加载，按键即刻响应；CLI 状态查询的只读 git 调用并行执行
 - **1:1 双向同步**：推送 = 本地覆盖远程（分叉自动强推，丢弃远程独有提交）；拉取 = 远程复刻本地（fetch + reset + clean，丢弃本地独有内容与未跟踪文件）
 - **文件级控制**：文件视图展示变化/忽略文件列表，Enter 切换推送（加入 Git）与忽略（加入 .gitignore）
 - **版本恢复**：拉取视图浏览最近 20 个 commit，回车直接 `reset --hard` 到任意历史版本；首项支持对齐远程
@@ -62,7 +63,7 @@ python -m main switch <branch>      # 切换分支（-c 新建并切换）
 github_sync.bat
 ```
 
-该脚本行为按位置区分：在仓库根运行（main.py 与 bat 同目录）时，自动把 `GITHUBSYNC_REPO` 静默持久化到用户环境变量并进入交互模式（同步本目录）；把 bat 复制到其他位置（便携）运行时，读取 `GITHUBSYNC_REPO`（进程内缺失则回退用户环境变量）定位 GitHubSync 代码仓库（均未设置则报错退出码 3），同步目标是 bat 所在目录。
+该脚本为纯批处理实现（零 PowerShell），行为按位置区分：在仓库根运行（main.py 与 bat 同目录）时，自动把 `GITHUBSYNC_REPO` 静默持久化到用户环境变量并进入交互模式（同步本目录）；把 bat 复制到其他位置（便携）运行时，读取 `GITHUBSYNC_REPO`（进程内缺失则回退用户环境变量）定位 GitHubSync 代码仓库（均未设置则报错退出码 3），同步目标是 bat 所在目录。
 
 ### 交互模式操作
 
@@ -98,7 +99,7 @@ github_sync.bat
 ```
 GitHubSync/
 ├── main.py                # 入口：argparse 调度 + create_services 唯一组装点
-├── github_sync.bat        # Windows 启动器
+├── github_sync.bat        # Windows 启动器（纯批处理，零 PowerShell）
 ├── pyproject.toml         # 元数据（无全局命令；GITHUBSYNC_REPO 环境变量仅 github_sync.bat 层读写）
 ├── requirements.txt       # 空文件：零第三方依赖声明
 ├── AGENTS.md              # 开发文档

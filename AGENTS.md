@@ -19,7 +19,7 @@ GitHubSync 是一个 Windows 终端同步工具，将本地目录同步到 GitHu
 ```
 main.py                  # 入口：argparse 调度 + create_services 唯一组装点
 pyproject.toml           # 元数据（无全局命令；GITHUBSYNC_REPO 环境变量仅 github_sync.bat 层读写）
-github_sync.bat          # Windows 启动器：主场判定（同目录 main.py + cli\parser.py + core\protocols.py 齐全）则静默持久化 GITHUBSYNC_REPO 到用户环境并同步本目录；便携副本读变量（进程内缺失回退用户注册表）定位代码、同步 bat 所在目录，均未设报错退出码 3
+github_sync.bat          # Windows 启动器（纯批处理，零 PowerShell）：主场三文件判定（同目录 main.py + cli\parser.py + core\protocols.py 齐全）则 setx 幂等持久化 GITHUBSYNC_REPO 到用户环境并同步本目录；便携副本读变量（进程内缺失回退用户注册表）定位代码、同步 bat 所在目录，均未设报错退出码 3
 │
 ├── core/                # 业务层：Provider 协议 + 用例服务（不碰 UI / 不碰 argparse）
 │   ├── config.py        # 语义色、键盘扫描码（KEY_*）
@@ -28,17 +28,18 @@ github_sync.bat          # Windows 启动器：主场判定（同目录 main.py 
 │   ├── events.py        # DomainEventBus + ActionLog 事件（业务→表现层解耦）
 │   ├── file_logger.py   # 文件日志：事件 + 命令详情落盘项目根 logs/ 会话文件（所有项目调用统一汇聚，logs/ 入 .gitignore）
 │   ├── exceptions.py    # SyncError 异常体系 + classify_push_error()
-│   ├── protocols.py     # GitProvider / GitHubProvider 协议（接口定义处）
+│   ├── protocols.py     # GitProvider / GitHubProvider 协议（接口定义处；ahead_behind_upstream() 为 @{u} 无参形式）
 │   ├── status.py        # RepoInfo / RepoStatus + parse_porcelain / decide_status
 │   ├── services.py      # Services 组合容器（git/gh/bus/status/sync/restore/file_ops/release）
-│   ├── status_service.py# StatusService：CLI 与交互模式的唯一状态来源
+│   ├── status_service.py# StatusService：CLI 与交互模式的唯一状态来源（只读 git 调用 ThreadPoolExecutor 一波并行）
 │   ├── sync_service.py  # 全量同步（扫描→提交→推送→失败恢复→Release）
 │   ├── restore_service.py / release_service.py / file_ops_service.py
 │   ├── command.py       # run_command（超时）+ retry 装饰器（仅只读操作）+ 命令日志钩子
-│   ├── git_provider.py  # GitCLIProvider：git CLI 实现
+│   ├── executor.py      # Inline/Thread 双实现（submit(fn, callback)；callback 在 worker 线程触发，仅允许线程安全操作如 queue.put，禁止 ANSI 渲染与事件发布）
+│   ├── git_provider.py  # GitCLIProvider：git CLI 实现（ahead_behind_upstream 走 HEAD...@{u}，get_status 无 remote 子进程）
 │   ├── github_provider.py # GhCLIProvider：gh CLI 实现
 │   ├── gitignore_parser.py # GitignoreMatcher：完整 gitignore 规范解析
-│   └── utils.py         # get_key / hide_cursor / get_display_width（VT100 启用在 ansi.py）
+│   └── utils.py         # get_key / poll_key（kbhit 轮询，默认 50ms）/ hide_cursor / get_display_width（VT100 启用在 ansi.py）
 │
 ├── cli/                 # CLI 表现层：argparse + 输出格式化（零业务逻辑）
 │   ├── parser.py        # build_parser：子命令 / path / -C / --json 等
@@ -48,8 +49,8 @@ github_sync.bat          # Windows 启动器：主场判定（同目录 main.py 
 │
 ├── tui/                 # 交互表现层：渲染纯函数 + 标签页视图（零业务逻辑、零子进程）
 │   ├── screen.py        # render_header / render_menu / render_status_line 纯函数
-│   ├── interactive.py   # InteractiveApp：顶栏常驻 + 内容区刷新 + 标签页单循环派发
-│   ├── view_base.py     # ViewBase：activate/render/handle_key/invalidate 懒加载骨架
+│   ├── interactive.py   # InteractiveApp：骨架首帧（info=None 零 I/O）+ 非阻塞主循环（poll_key 轮询 + queue 脏标志 drain）+ 状态/版本后台加载 + 顶栏常驻 + 标签页单循环派发
+│   ├── view_base.py     # ViewBase：activate/render/handle_key/invalidate + loading 态（executor 后台加载）
 │   ├── push_view.py     # 推送标签页：待推清单 + [·]/[✓]/[✕] 状态机
 │   ├── pull_view.py     # 拉取标签页：本地历史提交，首个 Enter 对齐远程，其余恢复
 │   ├── files_view.py    # 文件标签页：↑↓ 移动，Enter 切换推送/忽略
@@ -61,9 +62,10 @@ github_sync.bat          # Windows 启动器：主场判定（同目录 main.py 
 
 ### 标签页视图契约（ViewBase）
 
-- `activate()`：切入时调用，首次或失效后才 `_load()` 扫描数据（懒加载），缓存命中零扫描；
-- `render()`：缓存数据 → 内容区文本，纯函数零 I/O；
-- `handle_key(key)`：处理 ↑/↓/Enter，返回需失效的视图 id 列表，主循环统一 `invalidate()` 并对当前视图立即重扫；
+- 构造接受 `executor` / `on_loaded` 关键字参数（生产 ThreadExecutor 后台线程，测试默认 InlineExecutor 同步执行，保证确定性）；
+- `activate()`：切入时调用，首次或失效后才经 executor 踢后台 `_load()`（懒加载 + loading 态），缓存命中零扫描；加载完成回调置标记并触发 `on_loaded`（回调在 worker 线程触发，仅允许线程安全操作如 queue.put，ANSI 输出只在主线程）；
+- `render()`：缓存数据 → 内容区文本，纯函数零 I/O；loading 期间返回空串（留白不显示）；
+- `handle_key(key)`：处理 ↑/↓/Enter，返回需失效的视图 id 列表，主循环统一 `invalidate()` 并对当前视图立即重扫；loading 期间守卫返回 `[]`（含 Enter——空数据不得触发操作）；
 - `deactivate()`：切出时调用（默认无操作；PushView 借此清除推送结果锁定）；
 - 状态签名（status/change_count/ahead/behind）变化时主循环失效推送与拉取视图，当前视图立即重扫。
 
@@ -100,7 +102,7 @@ python -m main "C:\path\to\project"
 python -m main status
 python -m main push --yes
 
-# Windows 启动器（主场 = 同目录 main.py + cli\parser.py + core\protocols.py 齐全，静默持久化 GITHUBSYNC_REPO 到用户环境并同步本目录；便携副本读变量含注册表回退定位代码、同步 bat 所在目录，均未设报错）
+# Windows 启动器（纯批处理，零 PowerShell；主场 = 同目录 main.py + cli\parser.py + core\protocols.py 齐全，setx 幂等持久化 GITHUBSYNC_REPO 到用户环境并同步本目录；便携副本读变量含注册表回退定位代码、同步 bat 所在目录，均未设报错退出码 3）
 github_sync.bat
 ```
 
@@ -166,7 +168,7 @@ python -m main
 - 分层边界：core 不 import cli/tui；cli/tui 只依赖 core 服务与协议
 
 ### TUI 渲染规则（顶栏常驻 + 内容区刷新）
-- 顶栏（`render_header`）只绘制一次：项目 / 分支·状态 / 主页 / 版本 / 空行 / 菜单块 / 空行（版本行显示最新 Release tag，`InteractiveApp` 启动时 `_load_release_tag()` 获取一次后传入渲染；tag 文本包 `[link <releases_url> …]` markup，由 `core/ansi.py` 渲染为 OSC 8 超链接供终端 Ctrl+点击；无远程不渲染主页与版本行）
+- 顶栏（`render_header`）：启动首帧立即渲染骨架（`info=None`，7 行：项目行 + 留白状态行 + 菜单块，零 I/O）；git 状态与 gh Release tag 由后台线程加载，到达后更新为完整布局（项目 / 分支·状态 / 主页 / 版本 / 空行 / 菜单块 / 空行；版本行 tag 文本包 `[link <releases_url> …]` markup，由 `core/ansi.py` 渲染为 OSC 8 超链接供终端 Ctrl+点击；无远程不渲染主页与版本行）
 - 状态行变化 → `\x1b[2;1H\x1b[2K` 定点重写；菜单高亮变化 → `_redraw_menu` 定点重绘
 - 内容区变化 → `\x1b[{H+1};1H\x1b[J` 定位清除后重绘；内容相同 → 零输出
 - 输出行数受可用高度限制（`_content_rows`），超屏截断保留末尾，防止终端滚动顶掉顶栏
