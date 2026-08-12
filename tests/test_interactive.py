@@ -69,14 +69,17 @@ def test_render_main_contains_key_parts():
 
 
 def test_render_header_shows_remote_url():
-    """有远程 URL 时，顶栏显示「项目: 名 … 主页: URL（去 .git）」；无版本号时显示 `-`。"""
-    out = _strip_markup(render_header(
+    """有远程 URL 时，顶栏显示「项目: 名 … 主页: URL（去 .git）」；无版本号时显示 `none`。"""
+    raw = render_header(
         _info(RepoStatus.CHANGED, remote_url="https://github.com/Cairl/GitHubSync.git"),
-        "GitHubSync"))
+        "GitHubSync")
+    out = _strip_markup(raw)
     assert "Project: GitHubSync" in out
     assert "branch: main" in out
     assert "Home: https://github.com/Cairl/GitHubSync" in out
-    assert "Version: -" in out  # 未传版本号 → `-` 占位
+    assert "Version: none" in out       # 未传版本号 → `none` 占位
+    assert "[link" not in raw           # 无版本号不包 OSC 8 超链接（不可点击）
+    assert "#636363]none" in raw        # 占位文本用 COLOR_PLACEHOLDER 灰
 
 
 def test_render_header_shows_release_version():
@@ -296,7 +299,7 @@ def test_release_tag_loaded_once_at_startup():
 
 
 def test_release_tag_missing_and_failure_degrades_to_none(monkeypatch):
-    """无 Release 或 gh 查询失败时版本行降级为 `-`（release_tag 为 None）。"""
+    """无 Release 或 gh 查询失败时 release_tag 为 None（顶栏版本行显示 `none` 占位）。"""
     svc = make_services(initialized=True, remote="x")
     app = InteractiveApp(svc, "fake_repo", key_source=scripted([]),
                          out=lambda s: None)
@@ -627,3 +630,16 @@ def test_enter_swallowed_during_cooldown():
     # 第二个 Enter 被吞：推送结果锁定未清除（空推送清锁定逻辑未触发）
     assert app._views["push"]._push_result is True
     assert "[✓]" in app._view
+
+
+def test_render_header_skeleton_without_info():
+    """info=None 骨架：项目行 + 留白状态行 + 菜单（无同步标记），共 7 行。"""
+    raw = render_header(None, "GitHubSync", 80, active="push")
+    out = _strip_markup(raw)
+    lines = raw.split("\n")
+    assert len(lines) == 7
+    assert "Project: GitHubSync" in out
+    assert "branch:" not in out      # 状态行留白
+    assert "Home:" not in out and "Version:" not in out
+    assert "[Push]" in out           # 选中项括号保留
+    assert "*Push*" not in out       # 骨架无同步标记

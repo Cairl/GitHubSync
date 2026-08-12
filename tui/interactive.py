@@ -275,7 +275,7 @@ class InteractiveApp:
         self._paint()
 
     def _load_release_tag(self) -> str | None:
-        """启动时获取一次最新 Release 版本号；失败或无 Release 时返回 None（显示 `-`）。"""
+        """启动时获取一次最新 Release 版本号；失败或无 Release 时返回 None（显示 `none`）。"""
         try:
             latest = self.svc.gh.get_latest_release()
             tag = (latest or {}).get("tag", "").strip()

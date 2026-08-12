@@ -8,8 +8,8 @@ from __future__ import annotations
 import re
 
 from core.config import (COLOR_BRANCH_NAME, COLOR_LABEL, COLOR_MENU_ACTIVE_BG,
-                         COLOR_MENU_ACTIVE_FG, COLOR_MENU_BG, COLOR_SUCCESS_SOFT,
-                         COLOR_URL)
+                         COLOR_MENU_ACTIVE_FG, COLOR_MENU_BG, COLOR_PLACEHOLDER,
+                         COLOR_SUCCESS_SOFT, COLOR_URL)
 from core.i18n import tr
 from core.status import RepoInfo, RepoStatus
 from core.utils import get_display_width
@@ -63,12 +63,13 @@ def _has_sync(info: RepoInfo, item_id: str) -> bool:
 _MENU_SLOT = max(get_display_width(t) + 4 for _, t in MENU_ITEMS) + 2
 
 
-def render_menu(info: RepoInfo, active: str | None = None) -> str:
+def render_menu(info: RepoInfo | None, active: str | None = None) -> str:
     """菜单行（纯文本 markup，背景由 _menu_block 统一添加）。
 
     导航栏固定三项：推送 / 拉取 / 文件（任何状态下一致），← → 切换标签页
     即显示内容（免 Enter），Enter 执行当前标签内选中项。
     active: 当前标签 id（push/pull/files）。
+    info=None（骨架期）：无 `*` 同步标记（状态未知），其余渲染一致。
     三项等宽：每项独占 _MENU_SLOT 列槽位（按语言动态计算，见常量注释），
     内容（含括号与 `*` 标记）在槽内居中，未选中项为裸文本；选中项括号
     （如 `[推送]`）+ 底色 #636363，底色紧贴内容、两侧各留 1 格（宽 = 内容 + 2），
@@ -79,7 +80,7 @@ def render_menu(info: RepoInfo, active: str | None = None) -> str:
     """
     parts = []
     for item_id, text in MENU_ITEMS:
-        synced = _has_sync(info, item_id)
+        synced = _has_sync(info, item_id) if info is not None else False
         selected = active == item_id
         star = "*" if synced else ""
         label = f"{star}{text}{star}"
@@ -118,16 +119,20 @@ def render_status_line(info: RepoInfo) -> str:
 
 
 def render_version_line(info: RepoInfo, release_tag: str | None) -> str:
-    """版本行：标签 + 版本号（OSC 8 超链接，绿色与 [✓] 同色）；无远程时返回空串。
+    """版本行：标签 + 版本号；无远程时返回空串。
 
-    release_tag 为 None 时显示 `-` 占位。供顶栏首次绘制与发布后定点重绘共用。
+    release_tag 为 None 时显示 `none`（#636363 占位色，不可点击）；有版本号时
+    包 `[link …]` OSC 8 超链接（绿色与 [✓] 同色，终端 Ctrl+点击打开 Releases）。
+    供顶栏首次绘制与发布后定点重绘共用。
     """
     if not info.remote_url:
         return ""
-    tag = release_tag or "-"
+    label = f"[{COLOR_LABEL}]{tr('版本: ', 'Version: ')}[/]"
+    if not release_tag:
+        return f"  {label}[{COLOR_PLACEHOLDER}]none[/]"
     releases_url = _strip_git_suffix(info.remote_url) + "/releases"
-    return (f"  [{COLOR_LABEL}]{tr('版本: ', 'Version: ')}[/]"
-            f"[link {releases_url} {COLOR_SUCCESS_SOFT}]{tag}[/]")
+    return (f"  {label}"
+            f"[link {releases_url} {COLOR_SUCCESS_SOFT}]{release_tag}[/]")
 
 
 def _top_line(info: RepoInfo, project_name: str,
@@ -136,9 +141,9 @@ def _top_line(info: RepoInfo, project_name: str,
 
     release_tag: 最新 Release 版本号，由调用方启动时获取一次（渲染路径零 I/O）；
     有远程 URL 才显示主页与版本行，无远程时保持三行。版本获取失败或未发布
-    时显示 `-` 占位（行数固定，顶栏布局不受影响）。版本号文本包 `[link …]`
-    OSC 8 超链接（目标 = 仓库 Releases 页面），终端原生支持 Ctrl+点击打开，
-    与主页 URL 的交互一致。
+    时显示 `none`（#636363 占位色，不可点击；行数固定，顶栏布局不受影响）。
+    版本号文本包 `[link …]` OSC 8 超链接（目标 = 仓库 Releases 页面），终端
+    原生支持 Ctrl+点击打开，与主页 URL 的交互一致。
     """
     lines = [f"  [{COLOR_LABEL}]{tr('项目: ', 'Project: ')}[/]{project_name}",
              f"  {render_status_line(info)}"]
@@ -156,14 +161,14 @@ def _visible_width(markup: str) -> int:
     return get_display_width(text)
 
 
-def render_menu_line(info: RepoInfo, active: str | None, width: int) -> str:
+def render_menu_line(info: RepoInfo | None, active: str | None, width: int) -> str:
     """菜单行完整渲染（#292929 背景 + 行首缩进 2 空格 + 延伸至右缘），供定点重绘。"""
     menu = render_menu(info, active)
     pad = max(0, width - 2 - _visible_width(menu))
     return f"[on {COLOR_MENU_BG}]  {menu}{' ' * pad}[/]"
 
 
-def _menu_block(info: RepoInfo, width: int, active: str | None = None) -> str:
+def _menu_block(info: RepoInfo | None, width: int, active: str | None = None) -> str:
     """菜单块：菜单行上下各一行 #292929 背景空行，背景延伸至终端右缘，行首缩进 2 空格。"""
     blank = f"[on {COLOR_MENU_BG}]{' ' * width}[/]"
     return "\n".join([blank, render_menu_line(info, active, width), blank])
@@ -177,13 +182,20 @@ def render_main(info: RepoInfo, project_name: str,
                       render_status_line(info), line3])
 
 
-def render_header(info: RepoInfo, project_name: str, width: int = 80,
+def render_header(info: RepoInfo | None, project_name: str, width: int = 80,
                   active: str | None = None,
                   release_tag: str | None = None) -> str:
     """顶部常驻栏：项目 / 分支 / 主页 / 版本 / 空行 / 菜单块 / 空行。
 
     固定在屏幕顶部；内容区（变更列表、日志、各视图）在其下方刷新。
     release_tag: 最新 Release 版本号（启动时获取一次，见 _top_line）。
+    info=None（骨架期，启动首帧）：项目行 + 留白状态行 + 空行 + 菜单块 + 空行，
+    共 7 行（与无远程布局行数一致，分支/主页/版本留白不显示，数据到达后补全）。
     """
+    if info is None:
+        project = (f"  [{COLOR_LABEL}]{tr('项目: ', 'Project: ')}[/]"
+                   f"{project_name}")
+        return "\n".join([project, "", "",
+                          _menu_block(None, width, active), ""])
     return "\n".join([_top_line(info, project_name, release_tag), "",
                       _menu_block(info, width, active), ""])
