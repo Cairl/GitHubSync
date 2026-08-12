@@ -80,18 +80,21 @@ class GhCLIProvider:
         slug = self.get_repo_slug()
         if not slug:
             return None
+        # gh release list 默认按创建时间排序，edit 过的 tag（如 26w33c）会被排到后面，
+        # 导致 --limit 1 取到旧 tag、版本号撞车。拉多条后按 publishedAt 取最新。
         ok, out = run_command([
-            "gh", "release", "list", "--repo", slug, "--limit", "1",
+            "gh", "release", "list", "--repo", slug, "--limit", "30",
             "--json", "tagName,publishedAt",
         ], timeout=DEFAULT_TIMEOUT)
         if ok and out:
             try:
                 data = json.loads(out)
-                if data:
-                    return {"tag": data[0].get("tagName", ""),
-                            "published_at": data[0].get("publishedAt", "")}
-            except (ValueError, IndexError):
-                pass
+            except ValueError:
+                data = []
+            if data:
+                best = max(data, key=lambda r: r.get("publishedAt", "") or "")
+                return {"tag": best.get("tagName", ""),
+                        "published_at": best.get("publishedAt", "")}
             # 回退：解析文本输出（首列为标签名）
             parts = out.split()
             if parts:

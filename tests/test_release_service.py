@@ -67,3 +67,28 @@ def test_maybe_publish_publishes_and_deletes(tmp_path):
     assert "修复 bug" in notes
     assert not os.path.exists(changelog)  # 发布后删除本地 changelog
     assert len(published) == 1
+
+
+def test_get_latest_release_sorts_by_published_at(monkeypatch):
+    """gh release list 按创建时间排序时，取 publishedAt 最新的 tag（防版本号撞车）。"""
+    import json as _json
+
+    from core.github_provider import GhCLIProvider
+    import core.github_provider as gh_mod
+
+    provider = GhCLIProvider(".")
+    monkeypatch.setattr(provider, "get_repo_slug", lambda: "octocat/repo")
+    # 模拟 gh 默认排序：edit 过的 26w33c 排后面，创建更早的 26w33b 在首位
+    payload = _json.dumps([
+        {"tagName": "26w33b", "publishedAt": "2026-08-10T12:49:32Z"},
+        {"tagName": "26w33a", "publishedAt": "2026-08-10T11:02:48Z"},
+        {"tagName": "26w33c", "publishedAt": "2026-08-10T12:51:09Z"},
+    ])
+    monkeypatch.setattr(gh_mod, "run_command", lambda *a, **k: (True, payload))
+
+    latest = provider.get_latest_release()
+    assert latest == {"tag": "26w33c",
+                      "published_at": "2026-08-10T12:51:09Z"}
+    # 版本号计算不撞车：26w33c → 26w33d（33 周内递增）
+    assert ReleaseService.calculate_next_version(
+        latest, now=datetime(2026, 8, 10, 13, 0, 0)) == "26w33d"
