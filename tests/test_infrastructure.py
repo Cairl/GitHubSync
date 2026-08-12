@@ -152,9 +152,9 @@ def test_fake_git_ahead_behind_and_remote():
     from tests.fakes import FakeGitProvider
     g = FakeGitProvider()
     g.ahead, g.behind = 2, 1
-    assert g.ahead_behind("main") is None  # 未配置远程时无上游
+    assert g.ahead_behind_upstream() is None  # 未配置远程时无上游
     g.set_remote("https://github.com/o/r")
-    assert g.ahead_behind("main") == (2, 1)
+    assert g.ahead_behind_upstream() == (2, 1)
     assert g.remote_url() == "https://github.com/o/r"
 
 

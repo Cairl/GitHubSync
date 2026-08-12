@@ -21,15 +21,14 @@ class GitCLIProvider:
     # ── 仓库状态 ──
     def get_status(self) -> dict:
         if not os.path.exists(os.path.join(self.cwd, ".git")):
-            return {"initialized": False, "branch": "main", "remote": "未配置"}
+            return {"initialized": False, "branch": "main"}
         ok, branch = run_command(["git", "rev-parse", "--abbrev-ref", "HEAD"],
                                  cwd=self.cwd)
         if not ok or branch == "HEAD":
             ok, branch = run_command(["git", "branch", "--show-current"],
                                      cwd=self.cwd)
         branch = branch.strip() if ok and branch.strip() else "main"
-        remote = self.remote_url() or "未配置"
-        return {"initialized": True, "branch": branch, "remote": remote}
+        return {"initialized": True, "branch": branch}
 
     def current_branch(self) -> str:
         branch = self.get_status().get("branch", "")
@@ -45,10 +44,10 @@ class GitCLIProvider:
                             cwd=self.cwd, timeout=DEFAULT_TIMEOUT)
         return ok
 
-    def ahead_behind(self, branch: str) -> tuple[int, int] | None:
+    def ahead_behind_upstream(self) -> tuple[int, int] | None:
         ok, out = run_command(
-            ["git", "rev-list", "--left-right", "--count",
-             f"{branch}...origin/{branch}"], cwd=self.cwd)
+            ["git", "rev-list", "--left-right", "--count", "HEAD...@{u}"],
+            cwd=self.cwd)
         if not ok or not out:
             return None
         parts = out.split()

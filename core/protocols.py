@@ -13,7 +13,7 @@ class GitProvider(Protocol):
 
     # ── 仓库状态 ──
     def get_status(self) -> dict:
-        """返回 {"initialized": bool, "branch": str, "remote": str}。"""
+        """返回 {"initialized": bool, "branch": str}。"""
         ...
 
     def current_branch(self) -> str:
@@ -28,8 +28,8 @@ class GitProvider(Protocol):
         """git fetch origin（只读；网络失败返回 False，调用方降级处理）。"""
         ...
 
-    def ahead_behind(self, branch: str) -> tuple[int, int] | None:
-        """相对 origin/<branch> 的 (ahead, behind)；无上游或失败返回 None。"""
+    def ahead_behind_upstream(self) -> tuple[int, int] | None:
+        """相对上游跟踪分支的 (ahead, behind)（HEAD...@{u}）；无上游或失败返回 None。"""
         ...
 
     # ── 初始化与远程配置 ──

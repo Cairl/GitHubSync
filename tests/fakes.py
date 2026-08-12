@@ -55,7 +55,6 @@ class FakeGitProvider:
         return {
             "initialized": self.initialized,
             "branch": self.branch,
-            "remote": self.remote or "未配置",
         }
 
     def init_repo(self) -> None:
@@ -204,7 +203,7 @@ class FakeGitProvider:
         self.fetch_calls += 1
         return self.fetch_ok
 
-    def ahead_behind(self, branch: str) -> tuple[int, int] | None:
+    def ahead_behind_upstream(self) -> tuple[int, int] | None:
         if self.remote is None:
             return None
         return self.ahead, self.behind

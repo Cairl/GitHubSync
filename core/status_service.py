@@ -34,7 +34,7 @@ class StatusService:
         if fetch:
             self.git.fetch()  # 只读；失败静默降级为本地状态
         ahead, behind = 0, 0
-        ab = self.git.ahead_behind(branch)
+        ab = self.git.ahead_behind_upstream()
         if ab:
             ahead, behind = ab
         added, modified, deleted = parse_porcelain(self.git.get_porcelain())
