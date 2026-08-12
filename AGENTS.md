@@ -23,9 +23,10 @@ github_sync.bat          # Windows 启动器：Set-Location 到脚本目录后 p
 │
 ├── core/                # 业务层：Provider 协议 + 用例服务（不碰 UI / 不碰 argparse）
 │   ├── config.py        # 语义色、键盘扫描码（KEY_*）
-│   ├── ansi.py          # markup→ANSI 自研解析（[#hex]/[on #hex]/[bold]/[strike]、嵌套、isatty 判定）
+│   ├── ansi.py          # markup→ANSI 自研解析（[#hex]/[on #hex]/[bold]/[strike]/[link]、嵌套、isatty 判定）
 │   ├── i18n.py          # tr() 中英双语（按系统语言 / GITHUBSYNC_LANG 覆盖）
 │   ├── events.py        # DomainEventBus + ActionLog 事件（业务→表现层解耦）
+│   ├── file_logger.py   # 文件日志：事件 + 命令详情落盘 ~/.githubsync/githubsync.log（调试用）
 │   ├── exceptions.py    # SyncError 异常体系 + classify_push_error()
 │   ├── protocols.py     # GitProvider / GitHubProvider 协议（接口定义处）
 │   ├── status.py        # RepoInfo / RepoStatus + parse_porcelain / decide_status
@@ -33,7 +34,7 @@ github_sync.bat          # Windows 启动器：Set-Location 到脚本目录后 p
 │   ├── status_service.py# StatusService：CLI 与交互模式的唯一状态来源
 │   ├── sync_service.py  # 全量同步（扫描→提交→推送→失败恢复→Release）
 │   ├── restore_service.py / release_service.py / file_ops_service.py
-│   ├── command.py       # run_command（超时）+ retry 装饰器（仅只读操作）
+│   ├── command.py       # run_command（超时）+ retry 装饰器（仅只读操作）+ 命令日志钩子
 │   ├── git_provider.py  # GitCLIProvider：git CLI 实现
 │   ├── github_provider.py # GhCLIProvider：gh CLI 实现
 │   ├── gitignore_parser.py # GitignoreMatcher：完整 gitignore 规范解析
@@ -72,7 +73,7 @@ github_sync.bat          # Windows 启动器：Set-Location 到脚本目录后 p
 - **接口定义在 core/protocols.py，实现在 core/git_provider.py / github_provider.py**（依赖倒置，可替换实现）；
 - UI 永不触碰 git/gh 命令（tui/ 与 cli/ 中无 subprocess 调用，全部走 core 服务）；
 - 渲染路径零子进程：`tui/screen.py` 纯函数只读 RepoInfo；
-- 事件驱动：core 服务发布事件（DomainEventBus），表现层订阅刷新；交互模式取消订阅 ActionLog（同步操作无回显，结果由视图状态标记/颜色表达），CLI 仍按 stdout/stderr 契约输出。
+- 事件驱动：core 服务发布事件（DomainEventBus），表现层订阅刷新；交互模式取消订阅 ActionLog（同步操作无回显，结果由视图状态标记/颜色表达），CLI 仍按 stdout/stderr 契约输出；`core/file_logger.py` 在组合根订阅全部事件 + `core/command.py` 命令钩子，把 TUI 无回显的日志与命令详情落盘 `~/.githubsync/githubsync.log`（1MB 轮转，写失败静默）。
 
 ### 扩展性约定
 
@@ -139,6 +140,8 @@ python -m main
 | `↑` `↓` | 标签内移动选中项（文件 / 拉取历史 / 分支列表） |
 | `o` | 在浏览器中打开远程仓库（隐藏快捷键，不进菜单） |
 
+- 顶栏版本号是 OSC 8 超链接（目标 = 仓库 Releases 页面）：支持超链接的终端（Windows Terminal 等）中 Ctrl+点击直接打开，与主页 URL 的终端原生交互一致；程序零感知点击事件
+
 - Backspace / Esc 已废弃：按无效键处理（零输出），导航全靠 ← →
 - 导航栏固定四项：`推送` `拉取` `文件` `分支`（四项槽位等宽，`_MENU_SLOT` 按语言动态计算 = 最大内容（括号 2 + `*` 2 + 最长文本）+ 2：中文 10 / 英文 12，最密集时相邻间隙恒 2 格；内容槽内居中，仅选中项括号可见如 `[推送]` + `#636363` 底色紧贴内容、两侧各留 1 格（宽 = 内容 + 2），未选中项为裸文本无括号；框选左右移动、`*` 同步标记增减只改槽内留白，其他选项位置零偏移，行总宽恒 4×槽位，分叉时不再切换为恢复/强制推送）；推送 / 拉取有新的同步时文本两侧加 `*`（如 `*推送*`，选中时 `[*推送*]`，由 `_has_sync()` 判定：CHANGED/AHEAD/NO_REPO/NO_REMOTE/DIVERGED 标记推送，BEHIND/DIVERGED 标记拉取；分支项无 `*` 概念）
 - 分支标签页（`branch_view.py`）：本地分支列表，当前分支名浅绿 `COLOR_CYAN`；首行固定「合并到 main」（仅当前分支 ≠ main 时出现）——Enter 执行 checkout main → merge → push，冲突自动 merge --abort + 切回原分支并标 `[✕]`；分支行 Enter 切换（当前分支行无操作）；脏区（有未提交变更）Enter 一律标 `[!]` 拒绝；切换/合并成功返回全部视图 id 统一失效重扫；新建分支只走 CLI `switch -c`（TUI 无文本输入机制）
@@ -163,7 +166,7 @@ python -m main
 - 分层边界：core 不 import cli/tui；cli/tui 只依赖 core 服务与协议
 
 ### TUI 渲染规则（顶栏常驻 + 内容区刷新）
-- 顶栏（`render_header`）只绘制一次：项目 / 分支·状态 / 主页 / 空行 / 菜单块 / 空行
+- 顶栏（`render_header`）只绘制一次：项目 / 分支·状态 / 主页 / 版本 / 空行 / 菜单块 / 空行（版本行显示最新 Release tag，`InteractiveApp` 启动时 `_load_release_tag()` 获取一次后传入渲染；tag 文本包 `[link <releases_url> …]` markup，由 `core/ansi.py` 渲染为 OSC 8 超链接供终端 Ctrl+点击；无远程不渲染主页与版本行）
 - 状态行变化 → `\x1b[2;1H\x1b[2K` 定点重写；菜单高亮变化 → `_redraw_menu` 定点重绘
 - 内容区变化 → `\x1b[{H+1};1H\x1b[J` 定位清除后重绘；内容相同 → 零输出
 - 输出行数受可用高度限制（`_content_rows`），超屏截断保留末尾，防止终端滚动顶掉顶栏

@@ -20,10 +20,15 @@ import sys
 __version__ = "3.0.0"
 
 
-def create_services(repo_path: str):
-    """组合根：唯一组装依赖的地方。"""
+def create_services(repo_path: str, log_path: str | None = None):
+    """组合根：唯一组装依赖的地方。
+
+    log_path: 文件日志路径（默认 ~/.githubsync/githubsync.log，见 core/file_logger.py）；
+    传 None 用默认，测试或特殊场景可注入。
+    """
     from core.branch_service import BranchService
     from core.events import DomainEventBus
+    from core.file_logger import FileLogger
     from core.file_ops_service import FileOpsService
     from core.git_provider import GitCLIProvider
     from core.github_provider import GhCLIProvider
@@ -37,6 +42,9 @@ def create_services(repo_path: str):
     git = GitCLIProvider(repo_path)
     gh = GhCLIProvider(repo_path)
     release = ReleaseService(gh, bus, repo_path)
+    logger = FileLogger(log_path)
+    logger.attach(bus)  # 业务事件 + 命令执行详情落盘（TUI 无回显的日志进文件）
+    logger.log("INFO", f"Session start: {repo_path}")
     return Services(
         git=git, gh=gh, bus=bus,
         status=StatusService(git, repo_path),

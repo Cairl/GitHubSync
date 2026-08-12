@@ -181,3 +181,98 @@ def test_fake_git_remote_head():
     assert g.remote_head("main") is None
     g.remote_head_hash = "fedcba9876543210"
     assert g.remote_head("main") == "fedcba9876543210"
+
+
+# ── markup 超链接（OSC 8）──
+def test_markup_link_emits_osc8():
+    """`[link url]…[/]` 渲染为 OSC 8 超链接序列，可与颜色组合。"""
+    from core.ansi import render_markup
+    out = render_markup("[link https://x.test/a #F6E2B7]text[/]", color=True)
+    assert "\x1b]8;;https://x.test/a\x1b\\" in out  # 超链接开头
+    assert out.endswith("\x1b]8;;\x1b\\\x1b[0m")  # 闭合序列 + 样式恢复
+    assert "#F6E2B7" not in out  # 颜色已转为 SGR（无字面色值残留）
+
+
+def test_markup_link_stripped_when_plain():
+    """非 tty（管道/重定向）时超链接标签剥离，文本原样输出，无 OSC 8 序列。"""
+    from core.ansi import render_markup
+    assert render_markup("[link https://x.test/a #F6E2B7]text[/]",
+                         color=False) == "text"
+
+
+def test_markup_link_unclosed_safety_close():
+    """未闭合的 link 标签在末尾兜底闭合，防超链接泄漏到后续输出。"""
+    from core.ansi import render_markup
+    out = render_markup("[link https://x.test/a]text", color=True)
+    assert out.endswith("\x1b]8;;\x1b\\\x1b[0m")  # 兜底闭合 + 样式重置
+
+
+def test_markup_link_nested_with_color_restore():
+    """link 与颜色嵌套：闭合后外层样式恢复，OSC 8 闭合先于样式恢复。"""
+    from core.ansi import render_markup
+    out = render_markup("[bold][link https://x.test/a]x[/]y[/]", color=True)
+    assert "\x1b]8;;https://x.test/a\x1b\\x\x1b]8;;\x1b\\" in out
+    assert out.endswith("y\x1b[0m")  # 外层 bold 在 link 闭合后继续作用于 y
+
+
+# ── 文件日志（FileLogger）──
+def test_file_logger_writes_timestamped_line(tmp_path):
+    """log() 自动创建目录并写入 `时间 [级别] 消息` 行。"""
+    from core.file_logger import FileLogger
+    p = tmp_path / "sub" / "debug.log"  # 目录不存在，应自动创建
+    FileLogger(str(p)).log("ACTION", "发布 Release 26w32a")
+    content = p.read_text(encoding="utf-8")
+    assert "[ACTION] 发布 Release 26w32a" in content
+    assert content.startswith("20")  # 带时间戳
+
+
+def test_file_logger_attaches_events_and_commands(tmp_path):
+    """attach() 后：事件总线 ActionLog 与命令执行（CMD OK/FAIL）全部落盘。"""
+    from core.command import clear_command_hooks, run_command
+    from core.events import ActionLog, DomainEventBus
+    from core.file_logger import FileLogger
+    clear_command_hooks()
+    try:
+        bus = DomainEventBus()
+        logger = FileLogger(str(tmp_path / "debug.log"))
+        logger.attach(bus)
+        bus.publish(ActionLog("DONE", "已推送"))
+        run_command([sys.executable, "-c", "print('hi')"])
+        run_command([sys.executable, "-c", "import sys; sys.exit(1)"])
+        content = (tmp_path / "debug.log").read_text(encoding="utf-8")
+        assert "[DONE] 已推送" in content
+        assert "[CMD OK" in content and "-c" in content
+        assert "[CMD FAIL" in content
+    finally:
+        clear_command_hooks()
+
+
+def test_file_logger_reprs_domain_events(tmp_path):
+    """非 ActionLog 事件以 repr 落盘（含关键字段）。"""
+    from core.events import DomainEventBus, SyncCompleted
+    from core.file_logger import FileLogger
+    bus = DomainEventBus()
+    logger = FileLogger(str(tmp_path / "debug.log"))
+    logger.attach(bus)
+    bus.publish(SyncCompleted(pushed=True, committed=2))
+    content = (tmp_path / "debug.log").read_text(encoding="utf-8")
+    assert "SyncCompleted" in content and "pushed=True" in content
+
+
+def test_file_logger_rotates_over_limit(tmp_path, monkeypatch):
+    """超过大小上限后轮转：旧内容进 .1，主文件重新开始。"""
+    import core.file_logger as fl
+    monkeypatch.setattr(fl, "MAX_LOG_SIZE", 60)
+    p = tmp_path / "debug.log"
+    logger = fl.FileLogger(str(p))
+    for i in range(40):
+        logger.log("X", "y" * 20)
+    assert (tmp_path / "debug.log.1").exists()
+    assert p.exists()
+
+
+def test_file_logger_write_failure_silent(tmp_path):
+    """路径不可写（指向目录）时静默降级，不抛异常。"""
+    from core.file_logger import FileLogger
+    logger = FileLogger(str(tmp_path))  # path 是目录，open 会失败
+    logger.log("X", "msg")  # 不抛

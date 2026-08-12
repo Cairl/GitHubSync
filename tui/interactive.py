@@ -2,6 +2,7 @@
 
 导航栏即标签栏：←/→ 直接切换标签页并即时显示内容（免 Enter）；
 ↑/↓/Enter 转发当前标签视图（ViewBase.handle_key）；o 打开远程仓库；
+版本行是 OSC 8 超链接（终端原生 Ctrl+点击打开 Releases，程序零感知）；
 Backspace/Esc 与其余键均为无效键（零输出）。退出无专用按键，直接关窗口。
 
 屏幕模型：
@@ -74,6 +75,7 @@ class InteractiveApp:
         self._last_content = ""         # 上次内容区文本（去重）
         self._header_rows: int | None = None  # 顶栏行数（首次绘制后固定）
         self._last_sig: tuple | None = None   # 状态签名（status/count/ahead/behind）
+        self._release_tag: str | None = None  # 最新 Release 版本号（启动时获取一次）
         # 视图注册表：构造即建（零扫描），数据懒加载在 activate
         self._views: dict[str, ViewBase] = {
             "push": PushView(svc.sync, svc.git,
@@ -101,14 +103,14 @@ class InteractiveApp:
         return "\n".join(parts)
 
     def _header_lines(self) -> int:
-        """顶栏固定行数：项目 / 分支·状态 / [主页] / 空行 / 菜单块(3行) / 空行。
+        """顶栏固定行数：项目 / 分支·状态 / [主页 / 版本] / 空行 / 菜单块(3行) / 空行。
 
         首次绘制后固定：顶栏只在启动时绘制一次，之后 remote 状态变化
         （NO_REMOTE → 已配置 / ERROR）不得改变行号，否则定点重绘错位。
         """
         if self._header_rows is not None:
             return self._header_rows
-        return 8 if (self._info and self._info.remote_url) else 7
+        return 9 if (self._info and self._info.remote_url) else 7
 
     @staticmethod
     def _terminal_width() -> int:
@@ -153,7 +155,7 @@ class InteractiveApp:
             self._header_rows = self._header_lines()  # 顶栏布局以首次绘制为准
             header = markup_to_ansi(
                 render_header(self._info, self._project, self._terminal_width(),
-                              self._active))
+                              self._active, self._release_tag))
             self._out(_CLEAR_SCREEN + header)
             self._header_shown = True
             self._last_menu_markup = render_menu_line(
@@ -193,6 +195,8 @@ class InteractiveApp:
             show_cursor()  # 无论正常退出还是异常，恢复光标避免终端光标消失
 
     def _run(self) -> int:
+        # 最新 Release 版本号仅启动时获取一次（顶栏只绘制一次，此后不变）
+        self._release_tag = self._load_release_tag()
         while True:
             # 本地快速刷新（fetch=False，无网络开销；fetch 仅推送流程内执行）
             info = self.svc.status.get_status(fetch=False)
@@ -265,3 +269,12 @@ class InteractiveApp:
         else:
             self._logs.append(tr("> 未配置远程仓库", "> No remote configured"))
         self._paint()
+
+    def _load_release_tag(self) -> str | None:
+        """启动时获取一次最新 Release 版本号；失败或无 Release 时返回 None（显示 `-`）。"""
+        try:
+            latest = self.svc.gh.get_latest_release()
+            tag = (latest or {}).get("tag", "").strip()
+            return tag or None
+        except Exception:
+            return None

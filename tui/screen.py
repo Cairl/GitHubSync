@@ -1,6 +1,7 @@
 """交互模式渲染：纯函数，RepoInfo → markup 文本（语法见 core/ansi.py）。零 I/O、零子进程。
 
-顶栏布局：项目/分支/主页 / 空行 / 菜单块（#292929 背景三行）/ 空行。
+顶栏布局：项目/分支/主页/版本 / 空行 / 菜单块（#292929 背景三行）/ 空行。
+版本行显示最新 GitHub Release 的 tag（启动时由 InteractiveApp 获取一次后传入）。
 """
 from __future__ import annotations
 
@@ -111,13 +112,25 @@ def render_status_line(info: RepoInfo) -> str:
             f"[{COLOR_BRANCH_NAME}]{info.branch}[/]")
 
 
-def _top_line(info: RepoInfo, project_name: str) -> str:
-    """顶栏信息区三行（行首统一缩进 2 空格）：项目: 名 / 分支: main / 主页: URL。"""
+def _top_line(info: RepoInfo, project_name: str,
+              release_tag: str | None = None) -> str:
+    """顶栏信息区四行（行首统一缩进 2 空格）：项目: 名 / 分支: main / 主页: URL / 版本: tag。
+
+    release_tag: 最新 Release 版本号，由调用方启动时获取一次（渲染路径零 I/O）；
+    有远程 URL 才显示主页与版本行，无远程时保持三行。版本获取失败或未发布
+    时显示 `-` 占位（行数固定，顶栏布局不受影响）。版本号文本包 `[link …]`
+    OSC 8 超链接（目标 = 仓库 Releases 页面），终端原生支持 Ctrl+点击打开，
+    与主页 URL 的交互一致。
+    """
     lines = [f"  [{COLOR_LABEL}]{tr('项目: ', 'Project: ')}[/]{project_name}",
              f"  {render_status_line(info)}"]
     if info.remote_url:
         lines.append(f"  [{COLOR_LABEL}]{tr('主页: ', 'Home: ')}[/]"
                      f"[{COLOR_URL}]{_strip_git_suffix(info.remote_url)}[/]")
+        tag = release_tag or "-"
+        releases_url = _strip_git_suffix(info.remote_url) + "/releases"
+        lines.append(f"  [{COLOR_LABEL}]{tr('版本: ', 'Version: ')}[/]"
+                     f"[link {releases_url} {COLOR_URL}]{tag}[/]")
     return "\n".join(lines)
 
 
@@ -150,10 +163,12 @@ def render_main(info: RepoInfo, project_name: str,
 
 
 def render_header(info: RepoInfo, project_name: str, width: int = 80,
-                  active: str | None = None) -> str:
-    """顶部常驻栏：项目 / 分支 / 主页 / 空行 / 菜单块 / 空行。
+                  active: str | None = None,
+                  release_tag: str | None = None) -> str:
+    """顶部常驻栏：项目 / 分支 / 主页 / 版本 / 空行 / 菜单块 / 空行。
 
     固定在屏幕顶部；内容区（变更列表、日志、各视图）在其下方刷新。
+    release_tag: 最新 Release 版本号（启动时获取一次，见 _top_line）。
     """
-    return "\n".join([_top_line(info, project_name), "",
+    return "\n".join([_top_line(info, project_name, release_tag), "",
                       _menu_block(info, width, active), ""])

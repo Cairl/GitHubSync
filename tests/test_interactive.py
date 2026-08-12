@@ -61,13 +61,31 @@ def test_render_main_contains_key_parts():
 
 
 def test_render_header_shows_remote_url():
-    """有远程 URL 时，顶栏第一行显示「项目: 名 … 主页: URL（去 .git）」。"""
+    """有远程 URL 时，顶栏显示「项目: 名 … 主页: URL（去 .git）」；无版本号时显示 `-`。"""
     out = _strip_markup(render_header(
         _info(RepoStatus.CHANGED, remote_url="https://github.com/Cairl/GitHubSync.git"),
         "GitHubSync"))
     assert "Project: GitHubSync" in out
     assert "branch: main" in out
     assert "Home: https://github.com/Cairl/GitHubSync" in out
+    assert "Version: -" in out  # 未传版本号 → `-` 占位
+
+
+def test_render_header_shows_release_version():
+    """版本行显示最新 Release tag，文本包 OSC 8 超链接（终端 Ctrl+点击打开 Releases）。
+
+    `[link <releases_url> …]` 由 core/ansi.py 渲染为 OSC 8 序列；无远程 URL 时不渲染版本行。
+    """
+    out = render_header(
+        _info(RepoStatus.CHANGED, remote_url="https://github.com/Cairl/GitHubSync.git"),
+        "GitHubSync", release_tag="26w32a")
+    assert "[link https://github.com/Cairl/GitHubSync/releases #F6E2B7]26w32a[/]" in out
+    assert "Version: 26w32a" in _strip_markup(out)
+    # 无远程：无主页行也无版本行
+    out_no_remote = _strip_markup(render_header(
+        _info(RepoStatus.NO_REMOTE), "GitHubSync", release_tag="26w32a"))
+    assert "Version:" not in out_no_remote
+    assert "Home:" not in out_no_remote
 
 
 def test_render_main_diverged_no_bracket_detail():
@@ -253,6 +271,38 @@ def test_interactive_invalid_key_no_repaint():
     joined = "\n".join(out_lines)
     # 主屏只渲染一次；后续两轮内容相同 → 零输出
     assert joined.count("Project: fake_repo") == 1
+
+
+def test_release_tag_loaded_once_at_startup():
+    """启动时从 gh 获取一次最新 Release 版本号，供顶栏版本行显示。"""
+    svc = make_services(initialized=True, remote="x")
+    svc.gh.latest_release = {"tag": "26w32a", "published_at": ""}
+    out_lines = []
+    app = InteractiveApp(svc, "fake_repo", key_source=scripted([]),
+                         out=out_lines.append)
+    with pytest.raises(StopIteration):
+        app.run()
+    assert app._release_tag == "26w32a"
+    assert "26w32a" in "\n".join(out_lines)  # 顶栏版本行已渲染
+
+
+def test_release_tag_missing_and_failure_degrades_to_none(monkeypatch):
+    """无 Release 或 gh 查询失败时版本行降级为 `-`（release_tag 为 None）。"""
+    svc = make_services(initialized=True, remote="x")
+    app = InteractiveApp(svc, "fake_repo", key_source=scripted([]),
+                         out=lambda s: None)
+    with pytest.raises(StopIteration):
+        app.run()
+    assert app._release_tag is None
+    # 查询抛异常：同样降级为 None，不中断主循环
+    svc2 = make_services(initialized=True, remote="x")
+    monkeypatch.setattr(svc2.gh, "get_latest_release",
+                        lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    app2 = InteractiveApp(svc2, "fake_repo", key_source=scripted([]),
+                          out=lambda s: None)
+    with pytest.raises(StopIteration):
+        app2.run()
+    assert app2._release_tag is None
 
 
 def test_menu_sync_star_clears_after_push():
