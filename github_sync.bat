@@ -1,13 +1,9 @@
 @echo off
 rem GitHubSync launcher.
-rem Repo root (main.py beside the bat): write GITHUBSYNC_REPO to this dir, then run.
-rem Copied elsewhere (portable): call the existing GITHUBSYNC_REPO env var; error if unset.
-set "GITHUBSYNC_DIR=%~dp0"
-if exist "%GITHUBSYNC_DIR%main.py" (
-    set "GITHUBSYNC_REPO=%GITHUBSYNC_DIR%"
-) else if not defined GITHUBSYNC_REPO (
-    echo GitHubSync: GITHUBSYNC_REPO is not set. Run this bat from the repo root, or set GITHUBSYNC_REPO to the repo directory.
-    exit /b 3
-)
-powershell -NoProfile -Command "$dir = $env:GITHUBSYNC_REPO; $py = if (Get-Command python -ErrorAction SilentlyContinue) { 'python' } else { 'py' }; if (Test-Path (Join-Path $dir 'main.py')) { Set-Location $dir; & $py -m main; exit $LASTEXITCODE } else { Write-Host ('GitHubSync: main.py not found in ' + $dir + '. Set GITHUBSYNC_REPO to the GitHubSync repo directory.'); exit 3 }"
+rem Home (GitHubSync repo root beside this bat, detected by main.py + cli\parser.py + core\protocols.py):
+rem   silently persist GITHUBSYNC_REPO to the user environment, then sync this dir.
+rem Portable copy elsewhere: read GITHUBSYNC_REPO (user env as fallback) to locate the code,
+rem   then sync this bat's own directory.
+set "GITHUBSYNC_BAT_DIR=%~dp0"
+powershell -NoProfile -Command "$batDir = $env:GITHUBSYNC_BAT_DIR; $isHome = (Test-Path (Join-Path $batDir 'main.py')) -and (Test-Path (Join-Path $batDir 'cli\parser.py')) -and (Test-Path (Join-Path $batDir 'core\protocols.py')); if ($isHome) { $codeDir = $batDir; $target = $batDir.TrimEnd('\'); $env:GITHUBSYNC_REPO = $target; if ([Environment]::GetEnvironmentVariable('GITHUBSYNC_REPO','User') -ne $target) { [Environment]::SetEnvironmentVariable('GITHUBSYNC_REPO',$target,'User') } } else { if (-not $env:GITHUBSYNC_REPO) { $env:GITHUBSYNC_REPO = [Environment]::GetEnvironmentVariable('GITHUBSYNC_REPO','User') }; if (-not $env:GITHUBSYNC_REPO) { [Console]::Error.WriteLine('GitHubSync: GITHUBSYNC_REPO is not set. Run this bat from the repo root, or set GITHUBSYNC_REPO to the GitHubSync repo directory.'); exit 3 }; $codeDir = $env:GITHUBSYNC_REPO }; $syncDir = $batDir.TrimEnd('\'); $py = if (Get-Command python -ErrorAction SilentlyContinue) { 'python' } elseif (Get-Command py -ErrorAction SilentlyContinue) { 'py' } else { [Console]::Error.WriteLine('GitHubSync: Python not found. Install Python 3.12+ (or the py launcher) and retry.'); exit 3 }; if (Test-Path (Join-Path $codeDir 'main.py')) { Set-Location $codeDir; & $py -m main $syncDir; exit $LASTEXITCODE } else { [Console]::Error.WriteLine('GitHubSync: main.py not found in ' + $codeDir + '. Set GITHUBSYNC_REPO to the GitHubSync repo directory.'); exit 3 }"
 exit /b %errorlevel%

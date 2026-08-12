@@ -19,7 +19,7 @@ GitHubSync 是一个 Windows 终端同步工具，将本地目录同步到 GitHu
 ```
 main.py                  # 入口：argparse 调度 + create_services 唯一组装点
 pyproject.toml           # 元数据（无全局命令；GITHUBSYNC_REPO 环境变量仅 github_sync.bat 层读写）
-github_sync.bat          # Windows 启动器：Set-Location 到脚本目录后 python -m main
+github_sync.bat          # Windows 启动器：主场判定（同目录 main.py + cli\parser.py + core\protocols.py 齐全）则静默持久化 GITHUBSYNC_REPO 到用户环境并同步本目录；便携副本读变量（进程内缺失回退用户注册表）定位代码、同步 bat 所在目录，均未设报错退出码 3
 │
 ├── core/                # 业务层：Provider 协议 + 用例服务（不碰 UI / 不碰 argparse）
 │   ├── config.py        # 语义色、键盘扫描码（KEY_*）
@@ -100,7 +100,7 @@ python -m main "C:\path\to\project"
 python -m main status
 python -m main push --yes
 
-# Windows 启动器（GITHUBSYNC_REPO 仅在 bat 层读写：仓库根运行写入本目录；便携运行调用已设置变量）
+# Windows 启动器（主场 = 同目录 main.py + cli\parser.py + core\protocols.py 齐全，静默持久化 GITHUBSYNC_REPO 到用户环境并同步本目录；便携副本读变量含注册表回退定位代码、同步 bat 所在目录，均未设报错）
 github_sync.bat
 ```
 

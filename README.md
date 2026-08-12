@@ -62,7 +62,7 @@ python -m main switch <branch>      # 切换分支（-c 新建并切换）
 github_sync.bat
 ```
 
-该脚本行为按位置区分：在仓库根运行（main.py 与 bat 同目录）时，自动把 `GITHUBSYNC_REPO` 写入为当前目录再进入交互模式；把 bat 复制到其他位置运行时，则调用已设置的 `GITHUBSYNC_REPO` 变量（未设置则报错退出码 3）。
+该脚本行为按位置区分：在仓库根运行（main.py 与 bat 同目录）时，自动把 `GITHUBSYNC_REPO` 静默持久化到用户环境变量并进入交互模式（同步本目录）；把 bat 复制到其他位置（便携）运行时，读取 `GITHUBSYNC_REPO`（进程内缺失则回退用户环境变量）定位 GitHubSync 代码仓库（均未设置则报错退出码 3），同步目标是 bat 所在目录。
 
 ### 交互模式操作
 
