@@ -21,9 +21,10 @@ from .renderer import markup_to_ansi
 from .view_base import ViewBase
 
 # 单字母状态 → 符号标记（TUI 显示用；core.status.format_diff 保持字母契约不变）
-_CHANGE_CN = {"A": "[+]", "M": "[~]", "D": "[-]"}
-# 符号语义色：新增=柔和浅绿 / 修改=警告黄 / 删除=错误红
-_CHANGE_COLOR = {"A": COLOR_SUCCESS_SOFT, "M": COLOR_WARN, "D": COLOR_ERROR}
+_CHANGE_CN = {"A": "[+]", "M": "[~]", "D": "[-]", "R": "[→]"}
+# 符号语义色：新增=柔和浅绿 / 修改=警告黄 / 删除=错误红 / 重命名=警告黄
+_CHANGE_COLOR = {"A": COLOR_SUCCESS_SOFT, "M": COLOR_WARN, "D": COLOR_ERROR,
+                 "R": COLOR_WARN}
 # 推送状态符号 → 语义色：上传中=暗灰 / 完成=柔和浅绿 / 失败=错误红
 _PUSH_COLOR = {"·": COLOR_PUSH_PENDING, "✓": COLOR_SUCCESS_SOFT, "✕": COLOR_ERROR}
 
@@ -118,8 +119,9 @@ class PushView(ViewBase):
         files = []
         for line in out.splitlines():
             parts = line.split("\t")
-            if len(parts) == 2:
-                files.append((parts[0][:1], parts[1]))
+            if len(parts) >= 2:
+                # 普通行 "M\tpath"；rename/copy 行 "R100\told\tnew"（三字段，取新路径）
+                files.append((parts[0][:1], parts[-1]))
         return files
 
     def _diff_lines(self) -> list[str]:

@@ -55,8 +55,6 @@ class SyncService:
         if not git.remote_url():
             self._configure_remote()
 
-        # 先发布 Release：读取本地非空 changelog.md 成功后删除，避免入库残留；
-        # 已入库的 changelog.md（历史残留）删除后随本次同步提交推送清掉
         self.bus.publish(ActionLog("ACTION", tr("扫描更改", "Scanning changes")))
         ok, out = git.stage_all()
         if not ok:

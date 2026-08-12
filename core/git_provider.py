@@ -214,8 +214,13 @@ class GitCLIProvider:
         return commits
 
     def diff_name_status(self, base: str, head: str) -> str:
-        """git diff --name-status <base>...<head>（三点：merge-base 到 head 的变更）。"""
-        ok, out = run_command(["git", "diff", "--name-status",
+        """git diff --name-status <base>...<head>（三点：merge-base 到 head 的变更）。
+
+        带 -c core.quotepath=false：与 get_porcelain 一致，非 ASCII 路径
+        原样 UTF-8 输出，避免中文文件名八进制转义（AHEAD 推送页文件列表）。
+        """
+        ok, out = run_command(["git", "-c", "core.quotepath=false",
+                               "diff", "--name-status",
                                f"{base}...{head}"], cwd=self.cwd)
         return out if ok else ""
 

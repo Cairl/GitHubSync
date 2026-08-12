@@ -90,15 +90,18 @@ class GhCLIProvider:
             try:
                 data = json.loads(out)
             except ValueError:
-                data = []
+                data = None
             if data:
                 best = max(data, key=lambda r: r.get("publishedAt", "") or "")
                 return {"tag": best.get("tagName", ""),
                         "published_at": best.get("publishedAt", "")}
-            # 回退：解析文本输出（首列为标签名）
-            parts = out.split()
-            if parts:
-                return {"tag": parts[0], "published_at": ""}
+            if data is None:
+                # JSON 解析失败（旧版 gh 不支持 --json）：回退解析文本输出（首列为标签名）。
+                # 注意：无 Release 时 gh 输出 "[]"，JSON 解析成功但为空，此时应返回 None
+                # 而非把 "[]" 当 tag（顶栏显示 `-` 占位）。
+                parts = out.split()
+                if parts:
+                    return {"tag": parts[0], "published_at": ""}
         return None
 
     def get_all_releases(self, limit: int = 20) -> list[str]:

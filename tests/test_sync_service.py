@@ -82,6 +82,32 @@ def test_sync_changelog_pushed_then_published_and_deleted(tmp_path):
     assert result.committed == 1
 
 
+def test_sync_second_run_commits_changelog_deletion(tmp_path):
+    """发布后的 changelog.md 删除在下次同步被提交并推送（远端清掉残留）。"""
+    sync, git, gh, bus, _ = make_services(str(tmp_path))
+    git.init_repo()
+    git.remote = "https://github.com/octocat/repo"
+    git.files["a.txt"] = "hello"
+    git.files["changelog.md"] = "- 优化同步流程"
+    changelog_path = os.path.join(str(tmp_path), "changelog.md")
+    with open(changelog_path, "w", encoding="utf-8") as f:
+        f.write("- 优化同步流程")
+
+    first = sync.run()
+    assert gh.published                             # 首次发布 Release
+    assert not os.path.exists(changelog_path)       # 发布后本地删除
+    assert "changelog.md" in git.tracked            # 首次已入库
+
+    # 模拟发布后的工作区状态：内存工作区同步删除 changelog.md（fakes 与磁盘不同步）
+    del git.files["changelog.md"]
+    second = sync.run()
+
+    assert "changelog.md" not in git.tracked        # 删除已提交（tracked 移除）
+    assert second.committed == 1
+    assert second.updated_items == {"changelog.md": "D"}  # 计入删除项
+    assert not git.staged                           # 暂存已清空
+
+
 def test_sync_changelog_publish_failure_keeps_local(tmp_path):
     """发布失败：文件保留本地且已入库，同步仍成功。"""
     sync, git, gh, bus, _ = make_services(str(tmp_path))

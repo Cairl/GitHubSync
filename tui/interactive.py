@@ -291,7 +291,9 @@ class InteractiveApp:
         if tag == self._release_tag:
             return
         self._release_tag = tag
-        if self._header_shown:
-            # 有远程时顶栏 9 行布局：1 项目 / 2 分支·状态 / 3 主页 / 4 版本 / 5 空 / 6-8 菜单块 / 9 空
+        # 版本行只存在于 9 行布局（有远程）；启动时无远程的 7 行布局没有该行，
+        # 行号按冻结的 _header_rows 判定，避免首次同步配置远程后把版本行写进菜单块
+        if self._header_shown and self._header_rows == 9:
+            # 顶栏 9 行布局：1 项目 / 2 分支·状态 / 3 主页 / 4 版本 / 5 空 / 6-8 菜单块 / 9 空
             line = markup_to_ansi(render_version_line(self._info, self._release_tag))
             self._out(f"\x1b[4;1H\x1b[2K{line}")
