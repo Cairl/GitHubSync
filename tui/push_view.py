@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import Callable
 
-from core.config import (COLOR_ERROR, COLOR_PUSH_PENDING, COLOR_SUCCESS_SOFT,
-                         COLOR_WARN, KEY_ENTER)
+from core.config import (COLOR_ERROR, COLOR_PLACEHOLDER, COLOR_PUSH_PENDING,
+                         COLOR_SUCCESS_SOFT, COLOR_WARN, KEY_ENTER)
 from core.exceptions import SyncError
 from core.i18n import tr
 from core.protocols import GitProvider
@@ -95,8 +95,11 @@ class PushView(ViewBase):
     def render(self) -> str:
         if self._push_state is not None:
             return "\n".join(self._render_push_lines())
-        # 无待推内容（clean 且无 ahead 且无 changelog）时用 none 占位
-        return "\n".join(self._lines) or "none"
+        lines = "\n".join(self._lines)
+        if not lines:
+            return markup_to_ansi(  # 无待推内容占位
+                f"[{COLOR_PLACEHOLDER}]none[/]")
+        return lines
 
     # ── 键处理 ──
     def handle_key(self, key: bytes) -> list[str]:

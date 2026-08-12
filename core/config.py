@@ -12,6 +12,7 @@ COLOR_PUSH_PENDING = "#636363"  # 上传中 [·] 标记（比 COLOR_GRAY 更暗�
 COLOR_WARN = "#F6E2B7"      # 警告 / 有变化（浅米黄）
 COLOR_ERROR = "#F85149"     # 错误 / 分叉
 COLOR_GRAY = "#8B949E"      # 次要信息
+COLOR_PLACEHOLDER = "#636363"  # 占位文本（none，与上传中 [·] / 菜单框选底色同灰）
 COLOR_URL = "#F6E2B7"       # 主页地址（米黄）
 COLOR_LABEL = "#666666"     # 标签（项目/分支/主页 冒号左边）
 COLOR_MENU_BG = "#292929"   # 菜单行背景

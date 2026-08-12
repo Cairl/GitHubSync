@@ -457,3 +457,27 @@ def test_branch_view_cursor_aligned():
     lines = view.render().splitlines()
     assert lines[0].index("main") == 3
     assert lines[1].index("feature") == 3
+
+
+def test_empty_state_none_colored_gray(monkeypatch, tmp_path):
+    """四个标签页空态 none 均以 #636363 灰色渲染（ANSI 38;2;99;99;99）。"""
+    import tui.renderer
+    monkeypatch.setattr(tui.renderer, "supports_color", lambda stream: True)
+    gray = "\x1b[38;2;99;99;99m"
+    # 推送（clean 无 ahead 无 changelog）
+    _, push, _ = _make_push_view(initialized=True, remote="x")
+    push.activate()
+    assert gray in push.render() and "none" in push.render()
+    # 拉取（无提交历史）
+    _, pull = _make_pull_view(initialized=True, remote="x", commits=[])
+    pull.activate()
+    assert gray in pull.render() and "none" in pull.render()
+    # 文件（无文件）
+    _, files = _make_files_view(tmp_path)
+    files.activate()
+    assert gray in files.render() and "none" in files.render()
+    # 分支（无本地分支）
+    _, branch = _make_branch_view(branches=[])
+    branch.activate()
+    assert gray in branch.render() and "none" in branch.render()
+

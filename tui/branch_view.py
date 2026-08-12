@@ -14,7 +14,7 @@ from typing import Callable
 
 from core.branch_service import BranchService
 from core.config import (COLOR_CYAN, COLOR_ERROR, COLOR_MENU_ACTIVE_BG,
-                         KEY_DOWN, KEY_ENTER, KEY_UP)
+                         COLOR_PLACEHOLDER, KEY_DOWN, KEY_ENTER, KEY_UP)
 from core.i18n import tr
 from core.protocols import GitProvider
 
@@ -59,7 +59,8 @@ class BranchView(ViewBase):
     def render(self) -> str:
         rows = self._rows()
         if not rows:
-            return "none"  # 无分支占位
+            return markup_to_ansi(  # 无分支占位
+                f"[{COLOR_PLACEHOLDER}]none[/]")
         # 窗口滚动（与拉取页同款）：防止列表超屏触发终端滚动
         visible = max(3, min(self._max_rows() - 1, len(rows)))
         half = visible // 2

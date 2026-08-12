@@ -7,7 +7,8 @@ Enter 切换推送/忽略后返回 ["files"] 由主循环失效重扫（等价�
 from __future__ import annotations
 
 from core.config import (COLOR_BRANCH, COLOR_ERROR, COLOR_MENU_ACTIVE_BG,
-                         COLOR_MENU_ACTIVE_FG, KEY_DOWN, KEY_ENTER, KEY_UP)
+                         COLOR_MENU_ACTIVE_FG, COLOR_PLACEHOLDER, KEY_DOWN,
+                         KEY_ENTER, KEY_UP)
 from core.file_ops_service import FileOpsService
 from core.i18n import tr
 from core.utils import get_display_width
@@ -96,7 +97,8 @@ class FilesView(ViewBase):
 
     def render(self) -> str:
         if not self._items:
-            return "none"  # 无文件占位
+            return markup_to_ansi(  # 无文件占位
+                f"[{COLOR_PLACEHOLDER}]none[/]")
         # 按钮列：已忽略 → 「推送」（Enter 纳入同步），未忽略 → 「忽略」（Enter 排除）
         push_text = tr("推送", "Push")
         ignore_text = tr("忽略", "Ignore")
