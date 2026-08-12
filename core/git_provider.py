@@ -213,6 +213,12 @@ class GitCLIProvider:
             commits.append({"hash": h, "time": t[:19]})
         return commits
 
+    def diff_name_status(self, base: str, head: str) -> str:
+        """git diff --name-status <base>...<head>（三点：merge-base 到 head 的变更）。"""
+        ok, out = run_command(["git", "diff", "--name-status",
+                               f"{base}...{head}"], cwd=self.cwd)
+        return out if ok else ""
+
     def remote_head(self, branch: str) -> str | None:
         ok, out = run_command(["git", "rev-parse", f"origin/{branch}"],
                               cwd=self.cwd)

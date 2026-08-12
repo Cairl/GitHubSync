@@ -38,6 +38,7 @@ class FakeGitProvider:
         self.clean_calls = 0
         self.remote_head_hash: str | None = None
         self.porcelain_calls = 0        # get_porcelain 调用计数（懒加载断言）
+        self.ahead_diff = ""            # diff_name_status 输出（AHEAD 推送页文件显示注入）
         self.recent_commits_calls = 0   # get_recent_commits 调用计数
         self.branches: list[str] = ["main"]
         self.switch_calls: list[tuple[str, bool]] = []
@@ -125,6 +126,9 @@ class FakeGitProvider:
             {"hash": c, "time": "2026-01-01 00:00:00"}
             for c in self.commits[-limit:][::-1]
         ]
+
+    def diff_name_status(self, base: str, head: str) -> str:
+        return self.ahead_diff
 
     def commit(self, message: str) -> tuple[bool, str | None]:
         if not self.staged:

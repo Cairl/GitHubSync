@@ -124,11 +124,15 @@ def test_push_view_ahead_placeholder():
     assert "1 local commit" in painted[0]
 
 
-def test_push_view_ahead_clean_tree_initial_shows_placeholder():
-    """AHEAD 且工作区干净：初始渲染即显示本地提交占位行（而非空白），与 *推送* 标记一致。"""
-    svc, view, _ = _make_push_view(initialized=True, remote="x", ahead=1)
+def test_push_view_ahead_clean_tree_initial_shows_files():
+    """AHEAD 且工作区干净：初始渲染显示本地领先提交涉及的文件（而非一句话/空白）。"""
+    svc, view, _ = _make_push_view(
+        initialized=True, remote="x", ahead=1,
+        ahead_diff="M\tcore/sync_service.py\nA\ttests/fakes.py")
     view.activate()
-    assert view.render() == "Pushing 1 local commit(s)"
+    lines = view.render().split("\n")
+    assert "[~] core/sync_service.py" in lines
+    assert "[+] tests/fakes.py" in lines
 
 
 def test_push_view_failure_marks_error():

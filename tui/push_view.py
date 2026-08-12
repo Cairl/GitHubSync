@@ -111,6 +111,17 @@ class PushView(ViewBase):
         return ["pull"]  # 提交历史已变
 
     # ── 内部 ──
+    def _ahead_files(self) -> list[tuple[str, str]]:
+        """本地领先提交涉及的文件 [(状态字母, 路径)]；查询失败返回空。"""
+        branch = self.git.current_branch()
+        out = self.git.diff_name_status(f"origin/{branch}", "HEAD")
+        files = []
+        for line in out.splitlines():
+            parts = line.split("\t")
+            if len(parts) == 2:
+                files.append((parts[0][:1], parts[1]))
+        return files
+
     def _diff_lines(self) -> list[str]:
         """文件级变化列表，符号标记（[+]/[~]/[-]）按语义着色，文件名纯文本。
 
@@ -129,8 +140,15 @@ class PushView(ViewBase):
             else:
                 lines.append(line)
         if not lines and self._get_info().ahead > 0:
-            # AHEAD 且工作区干净：初始渲染也显示占位行，避免空白与 *推送* 标记矛盾
-            lines = [_ahead_placeholder(self._get_info().ahead)]
+            # AHEAD 且工作区干净：显示本地领先提交涉及的文件，避免空白与 *推送* 标记矛盾
+            ahead_lines = []
+            for status, path in self._ahead_files():
+                label = _CHANGE_CN.get(status, status)
+                color = _CHANGE_COLOR.get(status)
+                if color:
+                    label = markup_to_ansi(f"[{color}]{label}[/]")
+                ahead_lines.append(f"{label} {path}")
+            lines = ahead_lines or [_ahead_placeholder(self._get_info().ahead)]
         return lines
 
     def _render_push_lines(self) -> list[str]:
@@ -159,8 +177,10 @@ class PushView(ViewBase):
                 paths.append(line[3:])
         info = self._get_info()
         if not paths and info.ahead > 0:
-            # AHEAD 且工作区干净：占位行表达推送本地提交，否则推送期间界面空白
-            paths = [_ahead_placeholder(info.ahead)]
+            # AHEAD 且工作区干净：以领先提交涉及的文件为待推清单，取不到才用占位行
+            paths = [path for _status, path in self._ahead_files()]
+            if not paths:
+                paths = [_ahead_placeholder(info.ahead)]
         if paths:
             self._push_paths = paths
             self._push_state = {p: "·" for p in paths}

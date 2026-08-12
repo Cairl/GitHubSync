@@ -105,6 +105,10 @@ class GitProvider(Protocol):
         """git status --porcelain 原始输出。"""
         ...
 
+    def diff_name_status(self, base: str, head: str) -> str:
+        """git diff --name-status <base>...<head> 原始输出（本地领先提交涉及的文件）。"""
+        ...
+
     def get_recent_commits(self, limit: int = 20) -> list[dict]:
         """[{"hash": str, "time": str}]，新的在前。"""
         ...
