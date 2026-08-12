@@ -23,8 +23,8 @@ __version__ = "3.0.0"
 def create_services(repo_path: str, log_path: str | None = None):
     """组合根：唯一组装依赖的地方。
 
-    log_path: 文件日志路径（默认 ~/.githubsync/githubsync.log，见 core/file_logger.py）；
-    传 None 用默认，测试或特殊场景可注入。
+    log_path: 文件日志路径（默认 ~/.githubsync/logs/ 下按时间戳生成会话文件，
+    所有项目调用统一汇聚，见 core/file_logger.py）；传 None 用默认，测试或特殊场景可注入。
     """
     from core.branch_service import BranchService
     from core.events import DomainEventBus

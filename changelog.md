@@ -1,2 +1,0 @@
-- 优化调用方式，github_sync.bat 支持 GITHUBSYNC_REPO 环境变量指定同步目录，移除全局命令安装依赖
-- 优化调用机制，GITHUBSYNC_REPO 环境变量完全由 github_sync.bat 层写入与读取，主程序不再读取环境变量

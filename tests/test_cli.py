@@ -166,8 +166,9 @@ def test_main_resolves_repo_from_cwd(monkeypatch, tmp_path):
     """无路径参数时，main 使用 os.getcwd() 作为仓库目录。"""
     import main as main_module
     monkeypatch.chdir(tmp_path)
+    # 日志写临时目录，避免污染真实 ~/.githubsync/logs
     monkeypatch.setattr("core.file_logger.default_log_path",
-                        lambda: str(tmp_path / "ghs.log"))
+                        lambda: str(tmp_path / "sess.log"))
     monkeypatch.setattr(sys, "argv", ["githubsync", "status", "--json"])
     code = main_module.main()
     # 未初始化的 git 仓库 → EXIT_FAILED（3），证明目录解析到 tmp_path

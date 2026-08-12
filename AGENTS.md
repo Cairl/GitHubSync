@@ -26,7 +26,7 @@ github_sync.bat          # Windows 启动器：Set-Location 到脚本目录后 p
 │   ├── ansi.py          # markup→ANSI 自研解析（[#hex]/[on #hex]/[bold]/[strike]/[link]、嵌套、isatty 判定）
 │   ├── i18n.py          # tr() 中英双语（按系统语言 / GITHUBSYNC_LANG 覆盖）
 │   ├── events.py        # DomainEventBus + ActionLog 事件（业务→表现层解耦）
-│   ├── file_logger.py   # 文件日志：事件 + 命令详情落盘 ~/.githubsync/githubsync.log（调试用）
+│   ├── file_logger.py   # 文件日志：事件 + 命令详情落盘项目根 logs/ 会话文件（所有项目调用统一汇聚，logs/ 入 .gitignore）
 │   ├── exceptions.py    # SyncError 异常体系 + classify_push_error()
 │   ├── protocols.py     # GitProvider / GitHubProvider 协议（接口定义处）
 │   ├── status.py        # RepoInfo / RepoStatus + parse_porcelain / decide_status
@@ -73,7 +73,7 @@ github_sync.bat          # Windows 启动器：Set-Location 到脚本目录后 p
 - **接口定义在 core/protocols.py，实现在 core/git_provider.py / github_provider.py**（依赖倒置，可替换实现）；
 - UI 永不触碰 git/gh 命令（tui/ 与 cli/ 中无 subprocess 调用，全部走 core 服务）；
 - 渲染路径零子进程：`tui/screen.py` 纯函数只读 RepoInfo；
-- 事件驱动：core 服务发布事件（DomainEventBus），表现层订阅刷新；交互模式取消订阅 ActionLog（同步操作无回显，结果由视图状态标记/颜色表达），CLI 仍按 stdout/stderr 契约输出；`core/file_logger.py` 在组合根订阅全部事件 + `core/command.py` 命令钩子，把 TUI 无回显的日志与命令详情落盘 `~/.githubsync/githubsync.log`（1MB 轮转，写失败静默）。
+- 事件驱动：core 服务发布事件（DomainEventBus），表现层订阅刷新；交互模式取消订阅 ActionLog（同步操作无回显，结果由视图状态标记/颜色表达），CLI 仍按 stdout/stderr 契约输出；`core/file_logger.py` 在组合根订阅全部事件 + `core/command.py` 命令钩子，把 TUI 无回显的日志与命令详情统一落盘项目根 `logs/githubsync-<时间戳毫秒>.log`（每次运行一个新会话文件，CLI/TUI、任何被同步项目都汇聚到此目录；`logs/` 由 GitHubSync 自身 .gitignore 排除；1MB 轮转，写失败静默）。
 
 ### 扩展性约定
 

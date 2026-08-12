@@ -276,3 +276,15 @@ def test_file_logger_write_failure_silent(tmp_path):
     from core.file_logger import FileLogger
     logger = FileLogger(str(tmp_path))  # path 是目录，open 会失败
     logger.log("X", "msg")  # 不抛
+
+
+def test_file_logger_defaults_to_session_file(monkeypatch, tmp_path):
+    """未传 path 时在统一日志目录生成会话文件（githubsync-<时间戳>.log）。"""
+    import os
+    from core.file_logger import FileLogger, LOG_PREFIX
+    monkeypatch.setattr("core.file_logger.LOG_DIR", str(tmp_path))
+    logger = FileLogger()
+    name = os.path.basename(logger.path)
+    assert name.startswith(LOG_PREFIX) and name.endswith(".log")
+    logger.log("INFO", "Session start")
+    assert (tmp_path / name).exists()
