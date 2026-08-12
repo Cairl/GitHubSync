@@ -48,6 +48,11 @@ def _changelog_bottom(rows: list[str]) -> list[str]:
     return rest + [""] + changelog
 
 
+def _ahead_placeholder(ahead: int) -> str:
+    """AHEAD 且工作区干净时的占位行：表达待推送的本地提交数。"""
+    return tr(f"推送 {ahead} 个本地提交", f"Pushing {ahead} local commit(s)")
+
+
 class PushView(ViewBase):
     """推送标签页。结果锁定期间 activate/invalidate 均不重扫（render 持续输出结果）。"""
 
@@ -123,6 +128,9 @@ class PushView(ViewBase):
                 lines.append(f"{label} {line[3:]}")
             else:
                 lines.append(line)
+        if not lines and self._get_info().ahead > 0:
+            # AHEAD 且工作区干净：初始渲染也显示占位行，避免空白与 *推送* 标记矛盾
+            lines = [_ahead_placeholder(self._get_info().ahead)]
         return lines
 
     def _render_push_lines(self) -> list[str]:
@@ -152,8 +160,7 @@ class PushView(ViewBase):
         info = self._get_info()
         if not paths and info.ahead > 0:
             # AHEAD 且工作区干净：占位行表达推送本地提交，否则推送期间界面空白
-            paths = [tr(f"推送 {info.ahead} 个本地提交",
-                        f"Pushing {info.ahead} local commit(s)")]
+            paths = [_ahead_placeholder(info.ahead)]
         if paths:
             self._push_paths = paths
             self._push_state = {p: "·" for p in paths}

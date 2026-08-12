@@ -124,6 +124,13 @@ def test_push_view_ahead_placeholder():
     assert "1 local commit" in painted[0]
 
 
+def test_push_view_ahead_clean_tree_initial_shows_placeholder():
+    """AHEAD 且工作区干净：初始渲染即显示本地提交占位行（而非空白），与 *推送* 标记一致。"""
+    svc, view, _ = _make_push_view(initialized=True, remote="x", ahead=1)
+    view.activate()
+    assert view.render() == "Pushing 1 local commit(s)"
+
+
 def test_push_view_failure_marks_error():
     svc, view, painted = _make_push_view(initialized=True, remote="x",
                                          files={"a.py": "1"})
