@@ -23,7 +23,7 @@ class FakeGitProvider:
         self.tracked: set[str] = set()
         self.staged: set[str] = set()
         self.commits: list[str] = []
-        self.gitignore_lines: list[str] = ["__pycache__/"]
+        self.gitignore_lines: list[str] = ["__pycache__/", "changelog.md"]
         self.fail_mode = "ok"       # ok | repo_not_found | rejected | network
         self.force_push_calls = 0
         self.force_fail = False     # True 时强推也失败（模拟分支保护）
@@ -85,7 +85,9 @@ class FakeGitProvider:
         self.staged.discard(filename)
 
     def stage_all(self) -> tuple[bool, str]:
-        self.staged = set(self.files) - self.tracked
+        # 与真实 git add . 一致：暂存新增与删除
+        self.staged = ((set(self.files) - self.tracked)
+                       | (self.tracked - set(self.files)))
         return True, ""
 
     def stage_paths(self, *paths: str) -> None:
@@ -128,7 +130,10 @@ class FakeGitProvider:
         if not self.staged:
             return False, None
         for f in self.staged:
-            self.tracked.add(f)
+            if f in self.files:
+                self.tracked.add(f)
+            else:
+                self.tracked.discard(f)
         self.staged.clear()
         self.commits.append(f"commit-{len(self.commits) + 1}")
         return True, ""
