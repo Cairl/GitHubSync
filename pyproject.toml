@@ -1,4 +1,4 @@
-# GitHubSync 打包元数据：pip install -e . 后提供全局 githubsync 命令
+# GitHubSync 元数据：不提供全局命令（GITHUBSYNC_REPO 环境变量仅 github_sync.bat 层读写）
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
@@ -9,9 +9,6 @@ version = "3.0.0"
 description = "CLI-first GitHub sync tool: see, decide, act, done"
 requires-python = ">=3.12"
 dependencies = []
-
-[project.scripts]
-githubsync = "main:main"
 
 [tool.setuptools]
 py-modules = ["main"]

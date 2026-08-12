@@ -27,8 +27,9 @@
 ```bash
 git clone <repo-url>
 cd GitHubSync
-pip install -e .
 ```
+
+无需安装：直接 `python -m main` 运行，目标目录由参数指定（默认当前目录）。环境变量 `GITHUBSYNC_REPO` 仅 `github_sync.bat` 使用，主程序不读取。
 
 ### 前置要求
 
@@ -40,16 +41,13 @@ pip install -e .
 ### 基本用法
 
 ```bash
-# 安装为全局命令（任意目录敲 githubsync 即同步当前目录）
-pip install -e .
-
 # 同步当前工作目录（交互模式）
 python -m main
 
-# 同步指定目录
-python -m main /path/to/your/repo
+# 同步指定目录（位置参数）
+python -m main D:\path\to\your\repo
 
-# CLI 子命令
+# CLI 子命令（目录来源优先级：-C > 位置参数 > 当前目录）
 python -m main status
 python -m main push --yes
 python -m main diff
@@ -63,7 +61,7 @@ python -m main switch <branch>      # 切换分支（-c 新建并切换）
 github_sync.bat
 ```
 
-该脚本会将项目所在目录作为同步目标，进入交互模式。
+该脚本行为按位置区分：在仓库根运行（main.py 与 bat 同目录）时，自动把 `GITHUBSYNC_REPO` 写入为当前目录再进入交互模式；把 bat 复制到其他位置运行时，则调用已设置的 `GITHUBSYNC_REPO` 变量（未设置则报错退出码 3）。
 
 ### 交互模式操作
 
@@ -98,7 +96,7 @@ github_sync.bat
 GitHubSync/
 ├── main.py                # 入口：argparse 调度 + create_services 唯一组装点
 ├── github_sync.bat        # Windows 启动器
-├── pyproject.toml         # 打包元数据（全局 githubsync 命令）
+├── pyproject.toml         # 元数据（无全局命令；GITHUBSYNC_REPO 环境变量仅 github_sync.bat 层读写）
 ├── requirements.txt       # 空文件：零第三方依赖声明
 ├── AGENTS.md              # 开发文档
 ├── cli/                   # CLI 表现层（parser / commands / output / exit_codes）

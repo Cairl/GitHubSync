@@ -1,5 +1,0 @@
-Metadata-Version: 2.4
-Name: githubsync
-Version: 3.0.0
-Summary: CLI-first GitHub sync tool: see, decide, act, done
-Requires-Python: >=3.12

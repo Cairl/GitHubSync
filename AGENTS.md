@@ -18,7 +18,7 @@ GitHubSync 是一个 Windows 终端同步工具，将本地目录同步到 GitHu
 
 ```
 main.py                  # 入口：argparse 调度 + create_services 唯一组装点
-pyproject.toml           # 打包：console_scripts githubsync = main:main
+pyproject.toml           # 元数据（无全局命令；GITHUBSYNC_REPO 环境变量仅 github_sync.bat 层读写）
 github_sync.bat          # Windows 启动器：Set-Location 到脚本目录后 python -m main
 │
 ├── core/                # 业务层：Provider 协议 + 用例服务（不碰 UI / 不碰 argparse）
@@ -89,20 +89,17 @@ winget install --id GitHub.cli
 # 登录 GitHub
 gh auth login
 
-# 安装为全局命令（任意目录敲 githubsync 即同步当前目录）
-pip install -e .
-
-# 运行交互模式（同步当前目录，无子命令 + tty 时进入）
+# 运行交互模式（无子命令 + tty 时进入；目录来源优先级：-C > 位置参数 > 当前目录）
 python -m main
 
-# 运行交互模式（同步指定目录）
+# 运行交互模式（同步指定目录，位置参数）
 python -m main "C:\path\to\project"
 
-# 运行 CLI 子命令（同步当前目录）
+# 运行 CLI 子命令（目录来源同上）
 python -m main status
 python -m main push --yes
 
-# Windows 启动器（同步脚本所在目录）
+# Windows 启动器（GITHUBSYNC_REPO 仅在 bat 层读写：仓库根运行写入本目录；便携运行调用已设置变量）
 github_sync.bat
 ```
 

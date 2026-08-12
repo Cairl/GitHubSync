@@ -1,4 +1,0 @@
-cli
-core
-main
-tui

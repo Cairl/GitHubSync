@@ -8,6 +8,9 @@
     githubsync diff       # 文件级变化列表
     githubsync info       # 远程地址 / 最近提交 / 最新 Release
     githubsync switch     # 切换分支（-c 新建并切换）
+
+目录来源优先级：-C/--repo > 位置参数 > 当前目录。环境变量（GITHUBSYNC_REPO）由
+github_sync.bat 层写入/读取，主程序不读取环境变量。
 """
 from __future__ import annotations
 
@@ -73,8 +76,9 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(args_list)
 
-    # 目录解析：-C/--repo 或位置参数优先，默认当前工作目录
-    repo = getattr(args, "repo", None) or getattr(args, "path", None) or top_path
+    # 目录解析：-C/--repo > 位置参数 > 当前工作目录（环境变量仅由 github_sync.bat 层处理）
+    repo = (getattr(args, "repo", None) or getattr(args, "path", None)
+            or top_path)
     repo_path = os.path.abspath(repo) if repo else os.getcwd()
     svc = create_services(repo_path)
 

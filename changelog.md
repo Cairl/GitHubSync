@@ -1,2 +1,2 @@
-- 优化推送标签页文件清单展示，changelog.md 置底并与其他文件间空一行，提升清单定位体验
-- 优化 changelog.md 文件管理，不再被 .gitignore 排除，可正常提交入库并随仓库推送
+- 优化调用方式，github_sync.bat 支持 GITHUBSYNC_REPO 环境变量指定同步目录，移除全局命令安装依赖
+- 优化调用机制，GITHUBSYNC_REPO 环境变量完全由 github_sync.bat 层写入与读取，主程序不再读取环境变量
