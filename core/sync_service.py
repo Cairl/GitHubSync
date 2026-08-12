@@ -40,8 +40,8 @@ class SyncService:
     def _run(self) -> SyncCompleted:
         git = self.git
         git.create_ignore()
-        # changelog.md 不入 ignore：清理旧版残留条目，保证始终可入库
-        git.remove_from_gitignore_file("changelog.md")
+        # changelog.md 隔离：不入库（旧版"必须入库"残留条目被修正为忽略）
+        git.ensure_gitignore_entry("changelog.md")
 
         st = git.get_status()
         if not st["initialized"]:
@@ -54,6 +54,10 @@ class SyncService:
                                                   "Repository initialized")))
         if not git.remote_url():
             self._configure_remote()
+
+        # 先发布 Release：读取本地非空 changelog.md 成功后删除，避免入库残留；
+        # 已入库的 changelog.md（历史残留）删除后随本次同步提交推送清掉
+        self.release.maybe_publish()
 
         self.bus.publish(ActionLog("ACTION", tr("扫描更改", "Scanning changes")))
         ok, out = git.stage_all()
@@ -72,8 +76,6 @@ class SyncService:
                                                 "Pushing to GitHub")))
         self._push_with_recovery()
         self.bus.publish(ActionLog("DONE", tr("推送完成", "Push completed")))
-
-        self.release.maybe_publish()
 
         result = SyncCompleted(pushed=True, committed=committed,
                                updated_items=updated_items)

@@ -77,6 +77,46 @@ def test_sync_changelog_tracked_residue_cleanup(tmp_path):
     assert result.pushed is True
 
 
+def test_sync_changelog_published_then_deleted_not_pushed(tmp_path):
+    """changelog.md 存在时：先发布 Release 并删除，不入库不推送。"""
+    sync, git, gh, bus, _ = make_services(str(tmp_path))
+    git.init_repo()
+    git.remote = "https://github.com/octocat/repo"
+    git.files["a.txt"] = "hello"
+    changelog_path = os.path.join(str(tmp_path), "changelog.md")
+    with open(changelog_path, "w", encoding="utf-8") as f:
+        f.write("- 优化同步流程")
+
+    result = sync.run()
+
+    assert gh.published                              # 已发布 Release
+    assert not os.path.exists(changelog_path)        # 发布后删除本地文件
+    assert "changelog.md" in git.gitignore_lines     # ensure 隔离生效（旧逻辑是 remove）
+    assert "changelog.md" not in git.tracked         # 不入库
+    assert "changelog.md" not in result.updated_items
+    assert "a.txt" in git.tracked
+    assert result.committed == 1
+
+
+def test_sync_changelog_publish_failure_keeps_local(tmp_path):
+    """发布失败：文件保留本地，gitignore 隔离不入库，同步仍成功。"""
+    sync, git, gh, bus, _ = make_services(str(tmp_path))
+    git.init_repo()
+    git.remote = "https://github.com/octocat/repo"
+    git.files["a.txt"] = "hello"
+    changelog_path = os.path.join(str(tmp_path), "changelog.md")
+    with open(changelog_path, "w", encoding="utf-8") as f:
+        f.write("- 待发布内容")
+    gh.publish_ok = False                            # 发布失败
+
+    result = sync.run()
+
+    assert os.path.exists(changelog_path)            # 文件保留待重试
+    assert "changelog.md" in git.gitignore_lines     # 隔离生效
+    assert "changelog.md" not in git.tracked         # 未入库
+    assert result.pushed is True                     # 其余文件正常推送
+
+
 def test_sync_repo_not_found_recovers(tmp_path):
     sync, git, gh, bus, _ = make_services(str(tmp_path))
     git.init_repo()
