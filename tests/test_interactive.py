@@ -281,8 +281,9 @@ def test_interactive_invalid_key_no_repaint():
     with pytest.raises(StopIteration):
         app.run()
     joined = "\n".join(out_lines)
-    # 主屏只渲染一次；后续两轮内容相同 → 零输出
-    assert joined.count("Project: fake_repo") == 1
+    # 整屏绘制恰好两次：骨架首帧（7 行布局）+ 状态到达后布局 7→9 一次性重绘；
+    # 后续无效键（内容未变）零输出
+    assert joined.count("Project: fake_repo") == 2
 
 
 def test_release_tag_loaded_once_at_startup():
@@ -643,3 +644,18 @@ def test_render_header_skeleton_without_info():
     assert "Home:" not in out and "Version:" not in out
     assert "[Push]" in out           # 选中项括号保留
     assert "*Push*" not in out       # 骨架无同步标记
+
+
+def test_skeleton_painted_before_status_loaded():
+    """首帧为骨架（无 branch 行，零 I/O），status 事件到达后补全。"""
+    svc = make_services(initialized=True, remote="x")
+    out_lines = []
+    app = InteractiveApp(svc, "fake_repo", key_source=scripted([]),
+                         out=out_lines.append)
+    with pytest.raises(StopIteration):
+        app.run()
+    first = out_lines[0]
+    assert "Project: fake_repo" in first
+    assert "branch:" not in first       # 骨架期状态行留白
+    assert "Home:" not in first         # 骨架期主页/版本行不渲染
+    assert "branch: main" in "\n".join(out_lines)  # 状态到达后补全

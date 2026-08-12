@@ -9,10 +9,19 @@ Backspace/Esc 与其余键均为无效键（零输出）。退出无专用按键
 - 顶部常驻栏：项目·分支 / 状态详情 / 菜单 / 分隔线（render_header）只绘一次；
 - 状态行变化 → ANSI 定点重写顶栏第二行；菜单变化 → _redraw_menu 定点重绘；
 - 内容区 = 当前标签视图块 + 日志块，变化才刷新，未变零输出（无效键不刷屏）。
+
+启动异步加载（骨架先行）：
+- run 首帧立即渲染骨架（info=None：项目行 + 留白状态行 + 菜单，约 50ms 内），
+  git 状态与 gh 版本号经 executor 后台加载，完成后置脏标志入队；
+- 主循环非阻塞（poll_key 50ms 轮询），每圈先 drain 事件队列再读键；
+- 状态首次到达：有远程时布局 7→9 一次性整屏重绘（顶栏"只绘一次"的唯一放宽），
+  无远程时状态行/菜单定点补全；视图 loading 态见 view_base.py。
+- 线程纪律：ANSI 输出只在主线程；后台线程只做数据获取 + queue.put。
 """
 from __future__ import annotations
 
 import os
+import queue
 import sys
 import time
 import webbrowser
@@ -21,11 +30,12 @@ from typing import Callable
 from core.config import (KEY_DOWN, KEY_ENTER, KEY_LEFT, KEY_O, KEY_RIGHT,
                          KEY_UP)
 from core.events import ReleasePublished
+from core.executor import InlineExecutor
 from core.i18n import tr
 from core.services import Services
 from core.status import RepoInfo
 from core.ansi import supports_color
-from core.utils import get_key, hide_cursor, show_cursor
+from core.utils import hide_cursor, poll_key, show_cursor
 
 from .branch_view import BranchView
 from .files_view import FilesView
@@ -57,13 +67,17 @@ class InteractiveApp:
     """
 
     def __init__(self, svc: Services, repo_path: str,
-                 key_source: Callable[[], bytes] = get_key,
+                 key_source: Callable[[], bytes] = poll_key,
                  out: Callable[[str], None] = print,
-                 cooldown: float = 1.0):
+                 cooldown: float = 1.0,
+                 executor=None):
         self.svc = svc
         self.repo_path = repo_path
         self._key = key_source
         self._out = out
+        # executor=None → 同步 InlineExecutor（测试确定性）；生产传 ThreadExecutor
+        self._executor = executor or InlineExecutor()
+        self._events: queue.Queue = queue.Queue()  # 后台完成事件（脏标志）
         self._cooldown = cooldown      # 动作执行后的 Enter 冷却期（秒），防连按
         self._last_action = 0.0        # 上次动作时间戳（time.monotonic）
         self._project = os.path.basename(self.repo_path.rstrip("\\/")) or self.repo_path
@@ -151,9 +165,11 @@ class InteractiveApp:
         self._last_content = text
 
     def _paint(self) -> None:
-        """增量刷新：顶栏只绘制一次，其后仅更新状态行/菜单高亮与内容区。"""
-        if self._info is None:
-            return
+        """增量刷新：顶栏只绘制一次，其后仅更新状态行/菜单高亮与内容区。
+
+        骨架期（_info is None）：首次调用渲染骨架顶栏（项目行 + 留白状态行 +
+        无标记菜单），此后零输出直到状态数据到达（见 _on_status）。
+        """
         content = self._content_text()
         if not self._header_shown:
             self._header_rows = self._header_lines()  # 顶栏布局以首次绘制为准
@@ -164,9 +180,12 @@ class InteractiveApp:
             self._header_shown = True
             self._last_menu_markup = render_menu_line(
                 self._info, self._active, self._terminal_width())
-            self._status_ansi = markup_to_ansi(f"  {render_status_line(self._info)}")
+            self._status_ansi = (markup_to_ansi(f"  {render_status_line(self._info)}")
+                                 if self._info else "")
             self._render_content(content)
             return
+        if self._info is None:
+            return  # 骨架期：状态行/菜单无数据可更新（首帧已画骨架）
         status = markup_to_ansi(f"  {render_status_line(self._info)}")
         if status != self._status_ansi:
             # 定点重写顶栏第二行（print 自带换行，光标落点不影响后续绝对定位）
@@ -199,35 +218,28 @@ class InteractiveApp:
             show_cursor()  # 无论正常退出还是异常，恢复光标避免终端光标消失
 
     def _run(self) -> int:
-        # 最新 Release 版本号仅启动时获取一次（顶栏只绘制一次，此后不变）
-        self._release_tag = self._load_release_tag()
+        # 首帧立即渲染骨架（零 I/O）；git 状态与 gh 版本号后台加载
+        self._paint()
+        self._executor.submit(
+            lambda: self.svc.status.get_status(fetch=False),
+            lambda info: self._events.put(("status", info)))
+        self._executor.submit(
+            self._load_release_tag,
+            lambda tag: self._events.put(("release", tag)))
         while True:
-            # 本地快速刷新（fetch=False，无网络开销；fetch 仅推送流程内执行）
-            info = self.svc.status.get_status(fetch=False)
-            self._info = info
-            sig = (info.status, info.change_count, info.ahead, info.behind)
-            sig_changed = sig != self._last_sig
-            self._last_sig = sig
-            if sig_changed:
-                # 工作区/远程状态变化：推送与拉取数据可能过期
-                # （推送结果锁定期间 PushView.activate 内部豁免重扫）
-                self._views["push"].invalidate()
-                self._views["pull"].invalidate()
-            if self._active is None:
-                # 初始标签 = 推荐动作落点，切入即显示内容
-                self._active = menu_for_action(recommended_action(info)[0])
-                self._current().activate()
-            elif sig_changed:
-                self._current().activate()  # 缓存命中零开销
-            self._set_view(self._current().render())
+            self._drain_events()
             key = self._key()
+            if key is None:
+                continue  # 无键：下圈继续 drain（后台完成即重绘）
+            if self._active is None:
+                continue  # 骨架期（状态未到达）：按键一律无效，标签尚未就位
             if key == KEY_LEFT:
                 self._switch(-1)
             elif key == KEY_RIGHT:
                 self._switch(1)
             elif key == KEY_O:
                 # 隐藏快捷键：打开远程仓库，不影响标签选择
-                self._open_remote(info)
+                self._open_remote(self._info)
             elif key in (KEY_UP, KEY_DOWN, KEY_ENTER):
                 if key == KEY_ENTER and \
                         time.monotonic() - self._last_action < self._cooldown:
@@ -238,10 +250,55 @@ class InteractiveApp:
                     self._views[vid].invalidate()
                 if self._active in stale:
                     view.activate()  # 当前视图数据过期：立即重扫
-                self._set_view(view.render())
                 if key == KEY_ENTER and stale:
+                    # 动作执行后本地状态已变（主循环不再每圈重查状态，
+                    # 启动异步加载后只查一次）：同步刷新一次顶栏/菜单
+                    self._refresh_status(False)
                     self._last_action = time.monotonic()
+                self._set_view(view.render())
             # 其余键（含 Backspace/Esc）：无效键，零输出
+
+    # ── 后台事件（executor 回调入队，主循环 drain 应用）──
+    def _drain_events(self) -> None:
+        """应用后台完成事件；只在主线程执行（渲染纪律）。"""
+        while True:
+            try:
+                kind, payload = self._events.get_nowait()
+            except queue.Empty:
+                return
+            if kind == "status":
+                self._on_status(payload)
+            elif kind == "release":
+                self._on_release_tag(payload)
+            elif kind == "view":
+                if self._active is not None:
+                    self._set_view(self._current().render())
+
+    def _on_status(self, info: RepoInfo | None) -> None:
+        """git 状态到达：首次确定布局/初始标签，其后按签名变化失效视图。"""
+        if info is None:
+            return  # 后台异常（executor 降级 None）：保持骨架，按键仍可用
+        first = self._info is None
+        sig = (info.status, info.change_count, info.ahead, info.behind)
+        sig_changed = sig != self._last_sig
+        self._last_sig = sig
+        self._info = info
+        if first:
+            if info.remote_url:
+                # 布局 7→9：一次性整屏重绘（顶栏"只绘一次"铁律的唯一放宽）
+                self._header_shown = False
+                self._header_rows = None
+            # 初始标签 = 推荐动作落点，切入即加载内容
+            self._active = menu_for_action(recommended_action(info)[0])
+            self._current().activate()
+        elif sig_changed:
+            # 工作区/远程状态变化：推送与拉取数据可能过期
+            # （推送结果锁定期间 PushView.activate 内部豁免重扫）
+            self._views["push"].invalidate()
+            self._views["pull"].invalidate()
+            self._current().activate()  # 缓存命中零开销
+        self._paint()
+        self._set_view(self._current().render())
 
     # ── 标签与动作 ──
     def _current(self) -> ViewBase:
@@ -259,9 +316,19 @@ class InteractiveApp:
         self._set_view(view.render())
 
     def _refresh_status(self, fetch: bool) -> RepoInfo:
-        """推送流程内刷新状态（fetch=True）并立即重绘顶栏。"""
+        """推送流程内刷新状态（fetch=True）并立即重绘顶栏。
+
+        主循环不再每圈重查状态（启动异步加载后只查一次），签名变化的
+        视图失效逻辑因此收在这里：推送/恢复等主动操作后同步调用本方法，
+        签名变化即失效推送与拉取视图（锁定期间 PushView 内部豁免）。
+        """
         info = self.svc.status.get_status(fetch=fetch)
         self._info = info
+        sig = (info.status, info.change_count, info.ahead, info.behind)
+        if sig != self._last_sig:
+            self._last_sig = sig
+            self._views["push"].invalidate()
+            self._views["pull"].invalidate()
         self._paint()
         return info
 
@@ -275,7 +342,7 @@ class InteractiveApp:
         self._paint()
 
     def _load_release_tag(self) -> str | None:
-        """启动时获取一次最新 Release 版本号；失败或无 Release 时返回 None（显示 `none`）。"""
+        """获取最新 Release 版本号；失败或无 Release 时返回 None（显示 `none`）。"""
         try:
             latest = self.svc.gh.get_latest_release()
             tag = (latest or {}).get("tag", "").strip()
@@ -283,17 +350,24 @@ class InteractiveApp:
         except Exception:
             return None
 
-    def _refresh_release_tag(self) -> None:
-        """Release 发布成功后刷新顶栏版本号：重新获取并定点重绘版本行（顶栏第 4 行）。"""
-        if not (self._info and self._info.remote_url):
-            return
-        tag = self._load_release_tag()
+    def _on_release_tag(self, tag: str | None) -> None:
+        """版本号到达（启动后台加载 / 发布后刷新）：更新缓存并定点重绘版本行。
+
+        版本行只存在于 9 行布局（有远程）；骨架期或无远程的 7 行布局没有该行，
+        行号按冻结的 _header_rows 判定，避免首次同步配置远程后把版本行写进菜单块。
+        状态数据未到时只更新缓存（整屏重绘会带上新版本号）。
+        """
         if tag == self._release_tag:
             return
         self._release_tag = tag
-        # 版本行只存在于 9 行布局（有远程）；启动时无远程的 7 行布局没有该行，
-        # 行号按冻结的 _header_rows 判定，避免首次同步配置远程后把版本行写进菜单块
-        if self._header_shown and self._header_rows == 9:
+        if (self._header_shown and self._header_rows == 9
+                and self._info and self._info.remote_url):
             # 顶栏 9 行布局：1 项目 / 2 分支·状态 / 3 主页 / 4 版本 / 5 空 / 6-8 菜单块 / 9 空
             line = markup_to_ansi(render_version_line(self._info, self._release_tag))
             self._out(f"\x1b[4;1H\x1b[2K{line}")
+
+    def _refresh_release_tag(self) -> None:
+        """Release 发布成功后刷新顶栏版本号（同步在推送流程内执行，主线程）。"""
+        if not (self._info and self._info.remote_url):
+            return
+        self._on_release_tag(self._load_release_tag())

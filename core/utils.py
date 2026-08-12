@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import msvcrt
 import sys
+import time
 import unicodedata
 
 
@@ -34,3 +35,21 @@ def get_key() -> bytes:
     if key in (b"\xe0", b"\x00"):
         return msvcrt.getch()
     return key
+
+
+def poll_key(timeout_ms: int = 50) -> bytes | None:
+    """非阻塞按键轮询：timeout 内有键返回扫描码，无键返回 None。
+
+    主循环借此在按键间隙处理后台任务完成的脏标志（数据到达即重绘，
+    不再阻塞在 getch 上等待按键才刷新）。
+    """
+    deadline = time.monotonic() + timeout_ms / 1000
+    while True:
+        if msvcrt.kbhit():
+            key = msvcrt.getch()
+            if key in (b"\xe0", b"\x00"):
+                return msvcrt.getch()
+            return key
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(0.01)

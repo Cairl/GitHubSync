@@ -95,8 +95,10 @@ def main(argv: list[str] | None = None) -> int:
             # 非交互环境（cron/管道）无子命令：显示帮助，避免 msvcrt 阻塞
             parser.print_help(sys.stderr)
             return EXIT_FAILED
+        from core.executor import ThreadExecutor
         from tui.interactive import InteractiveApp
-        return InteractiveApp(svc, repo_path).run()
+        return InteractiveApp(svc, repo_path,
+                              executor=ThreadExecutor()).run()
     return COMMANDS[args.command](args, svc)
 
 
