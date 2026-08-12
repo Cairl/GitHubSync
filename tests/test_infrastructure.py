@@ -288,3 +288,33 @@ def test_file_logger_defaults_to_session_file(monkeypatch, tmp_path):
     assert name.startswith(LOG_PREFIX) and name.endswith(".log")
     logger.log("INFO", "Session start")
     assert (tmp_path / name).exists()
+
+
+# ── executor 抽象 ──
+def test_inline_executor_runs_synchronously():
+    from core.executor import InlineExecutor
+    seen = []
+    InlineExecutor().submit(lambda: 42, seen.append)
+    assert seen == [42]
+
+
+def test_thread_executor_runs_callback_with_result():
+    import threading
+    from core.executor import ThreadExecutor
+    done = threading.Event()
+    seen = []
+    ex = ThreadExecutor(max_workers=1)
+    ex.submit(lambda: 7, lambda r: (seen.append(r), done.set()))
+    assert done.wait(2) and seen == [7]
+    ex.shutdown()
+
+
+def test_executor_exception_yields_none():
+    from core.executor import InlineExecutor
+    seen = []
+
+    def boom():
+        raise RuntimeError("x")
+
+    InlineExecutor().submit(boom, seen.append)
+    assert seen == [None]
