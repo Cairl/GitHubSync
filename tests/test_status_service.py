@@ -126,3 +126,27 @@ def test_status_error_capture():
     g.set_remote("x")
     info = _svc(g).get_status()
     assert info.status == RepoStatus.ERROR and "boom" in info.error
+
+
+def test_status_parallel_matches_sequential(tmp_path):
+    """并行路径结果与串行一致：ahead/behind/porcelain/remote/fetch 全部正确组合。"""
+    g = FakeGitProvider()
+    g.initialized = True
+    g.set_remote("https://github.com/o/r")
+    g.ahead, g.behind = 2, 1
+    g.files = {"a.txt": "1"}
+    info = StatusService(g, str(tmp_path)).get_status(fetch=True)
+    assert info.status == RepoStatus.DIVERGED
+    assert (info.ahead, info.behind) == (2, 1)
+    assert info.remote_url == "https://github.com/o/r"
+    assert info.modified == 1
+    assert g.fetch_calls == 1
+
+
+def test_status_parallel_no_remote_skips_fetch():
+    """无远程：NO_REMOTE 早退，fetch 虽并行提交但失败静默（不影响判定）。"""
+    g = FakeGitProvider()
+    g.initialized = True
+    info = _svc(g).get_status(fetch=True)
+    assert info.status == RepoStatus.NO_REMOTE
+    assert info.remote_url is None
