@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 
 from core.config import (COLOR_BRANCH_NAME, COLOR_LABEL, COLOR_MENU_ACTIVE_BG,
-                         COLOR_MENU_ACTIVE_FG, COLOR_MENU_BG, COLOR_SUCCESS,
+                         COLOR_MENU_ACTIVE_FG, COLOR_MENU_BG, COLOR_SUCCESS_SOFT,
                          COLOR_URL)
 from core.i18n import tr
 from core.status import RepoInfo, RepoStatus
@@ -113,6 +113,19 @@ def render_status_line(info: RepoInfo) -> str:
             f"[{COLOR_BRANCH_NAME}]{info.branch}[/]")
 
 
+def render_version_line(info: RepoInfo, release_tag: str | None) -> str:
+    """版本行：标签 + 版本号（OSC 8 超链接，绿色与 [✓] 同色）；无远程时返回空串。
+
+    release_tag 为 None 时显示 `-` 占位。供顶栏首次绘制与发布后定点重绘共用。
+    """
+    if not info.remote_url:
+        return ""
+    tag = release_tag or "-"
+    releases_url = _strip_git_suffix(info.remote_url) + "/releases"
+    return (f"  [{COLOR_LABEL}]{tr('版本: ', 'Version: ')}[/]"
+            f"[link {releases_url} {COLOR_SUCCESS_SOFT}]{tag}[/]")
+
+
 def _top_line(info: RepoInfo, project_name: str,
               release_tag: str | None = None) -> str:
     """顶栏信息区四行（行首统一缩进 2 空格）：项目: 名 / 分支: main / 主页: URL / 版本: tag。
@@ -128,10 +141,7 @@ def _top_line(info: RepoInfo, project_name: str,
     if info.remote_url:
         lines.append(f"  [{COLOR_LABEL}]{tr('主页: ', 'Home: ')}[/]"
                      f"[{COLOR_URL}]{_strip_git_suffix(info.remote_url)}[/]")
-        tag = release_tag or "-"
-        releases_url = _strip_git_suffix(info.remote_url) + "/releases"
-        lines.append(f"  [{COLOR_LABEL}]{tr('版本: ', 'Version: ')}[/]"
-                     f"[link {releases_url} {COLOR_SUCCESS}]{tag}[/]")
+        lines.append(render_version_line(info, release_tag))
     return "\n".join(lines)
 
 

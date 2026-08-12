@@ -20,6 +20,7 @@ from typing import Callable
 
 from core.config import (KEY_DOWN, KEY_ENTER, KEY_LEFT, KEY_O, KEY_RIGHT,
                          KEY_UP)
+from core.events import ReleasePublished
 from core.i18n import tr
 from core.services import Services
 from core.status import RepoInfo
@@ -32,7 +33,8 @@ from .pull_view import PullView
 from .push_view import PushView
 from .renderer import markup_to_ansi
 from .screen import (MENU_ITEMS, menu_for_action, recommended_action,
-                     render_header, render_menu_line, render_status_line)
+                     render_header, render_menu_line, render_status_line,
+                     render_version_line)
 from .view_base import ViewBase
 
 # 清屏 + 光标回左上角；仅首次绘制顶栏时使用
@@ -75,7 +77,9 @@ class InteractiveApp:
         self._last_content = ""         # 上次内容区文本（去重）
         self._header_rows: int | None = None  # 顶栏行数（首次绘制后固定）
         self._last_sig: tuple | None = None   # 状态签名（status/count/ahead/behind）
-        self._release_tag: str | None = None  # 最新 Release 版本号（启动时获取一次）
+        self._release_tag: str | None = None  # 最新 Release 版本号（启动时获取一次，发布后刷新）
+        # Release 发布成功后刷新顶栏版本号（同步在推送流程内执行，事件同步派发）
+        svc.bus.subscribe(ReleasePublished, lambda e: self._refresh_release_tag())
         # 视图注册表：构造即建（零扫描），数据懒加载在 activate
         self._views: dict[str, ViewBase] = {
             "push": PushView(svc.sync, svc.git,
@@ -278,3 +282,16 @@ class InteractiveApp:
             return tag or None
         except Exception:
             return None
+
+    def _refresh_release_tag(self) -> None:
+        """Release 发布成功后刷新顶栏版本号：重新获取并定点重绘版本行（顶栏第 4 行）。"""
+        if not (self._info and self._info.remote_url):
+            return
+        tag = self._load_release_tag()
+        if tag == self._release_tag:
+            return
+        self._release_tag = tag
+        if self._header_shown:
+            # 有远程时顶栏 9 行布局：1 项目 / 2 分支·状态 / 3 主页 / 4 版本 / 5 空 / 6-8 菜单块 / 9 空
+            line = markup_to_ansi(render_version_line(self._info, self._release_tag))
+            self._out(f"\x1b[4;1H\x1b[2K{line}")

@@ -79,7 +79,7 @@ def test_render_header_shows_release_version():
     out = render_header(
         _info(RepoStatus.CHANGED, remote_url="https://github.com/Cairl/GitHubSync.git"),
         "GitHubSync", release_tag="26w32a")
-    assert "[link https://github.com/Cairl/GitHubSync/releases #3FB950]26w32a[/]" in out
+    assert "[link https://github.com/Cairl/GitHubSync/releases #ABDFA7]26w32a[/]" in out
     assert "Version: 26w32a" in _strip_markup(out)
     # 无远程：无主页行也无版本行
     out_no_remote = _strip_markup(render_header(
@@ -153,6 +153,7 @@ def test_render_menu_sync_marks():
 # ── 标签页主循环 ──
 from core.config import (KEY_BACKSPACE, KEY_ENTER, KEY_LEFT, KEY_O,
                          KEY_RIGHT)
+from core.events import ReleasePublished
 from tests.fakes import make_services
 from tui.interactive import InteractiveApp
 
@@ -303,6 +304,25 @@ def test_release_tag_missing_and_failure_degrades_to_none(monkeypatch):
     with pytest.raises(StopIteration):
         app2.run()
     assert app2._release_tag is None
+
+
+def test_release_tag_refreshed_after_publish():
+    """Release 发布后顶栏版本号刷新为新 tag：重新获取并定点重绘版本行（第 4 行）。"""
+    svc = make_services(initialized=True, remote="x")
+    svc.gh.latest_release = {"tag": "26w32a", "published_at": ""}
+    out_lines = []
+    app = InteractiveApp(svc, "fake_repo", key_source=scripted([]),
+                         out=out_lines.append)
+    with pytest.raises(StopIteration):
+        app.run()
+    assert app._release_tag == "26w32a"
+    # 同步发布新 Release（模拟事件派发）：版本号应刷新并定点重绘
+    svc.gh.latest_release = {"tag": "26w32b", "published_at": ""}
+    svc.bus.publish(ReleasePublished("26w32b", "- 新"))
+    assert app._release_tag == "26w32b"
+    joined = "\n".join(out_lines)
+    assert "\x1b[4;1H\x1b[2K" in joined  # 定点重绘顶栏版本行
+    assert "26w32b" in joined
 
 
 def test_menu_sync_star_clears_after_push():
