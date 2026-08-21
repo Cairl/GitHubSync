@@ -47,19 +47,24 @@ class SyncService:
         st = git.get_status()
         if not st["initialized"]:
             self.bus.publish(ActionLog("ACTION", tr("初始化 Git 仓库",
-                                                    "Initializing git repository")))
+                                                    "Initializing git repository"),
+                                       stage="init"))
             git.init_repo()
             # 仅建仓时改名一次 main；此后同步不动分支名（推当前分支）
             git.branch_to_main()
             self.bus.publish(ActionLog("DONE", tr("仓库已初始化",
-                                                  "Repository initialized")))
+                                                  "Repository initialized"),
+                                       stage="init"))
         if not git.remote_url():
             self._configure_remote()
 
-        self.bus.publish(ActionLog("ACTION", tr("扫描更改", "Scanning changes")))
+        self.bus.publish(ActionLog("ACTION", tr("扫描更改", "Scanning changes"),
+                                   stage="scan"))
         ok, out = git.stage_all()
         if not ok:
             raise SyncError(tr("暂存文件失败", "Failed to stage files"), out)
+        self.bus.publish(ActionLog("DONE", tr("扫描完成", "Scanning complete"),
+                                   stage="scan"))
 
         # 已跟踪的 changelog.md（旧版入库残留）：从索引移除（本地文件保留），
         # 本次提交删除并推送，远端清掉残留；从未跟踪/已清理的仓库此检查跳过
@@ -72,12 +77,15 @@ class SyncService:
             committed = self._commit(updated_items)
         else:
             self.bus.publish(ActionLog("NOTE", tr("没有需要提交的更改",
-                                                  "No changes to commit")))
+                                                  "No changes to commit"),
+                                       stage="commit"))
 
         self.bus.publish(ActionLog("ACTION", tr("推送到 GitHub",
-                                                "Pushing to GitHub")))
+                                                "Pushing to GitHub"),
+                                   stage="push"))
         self._push_with_recovery()
-        self.bus.publish(ActionLog("DONE", tr("推送完成", "Push completed")))
+        self.bus.publish(ActionLog("DONE", tr("推送完成", "Push completed"),
+                                   stage="push"))
 
         # 推送后发布 Release：从本地读取 changelog.md 内容发布；
         # changelog.md 不入库（gitignore 隔离），远端无残留，无需提交删除
@@ -98,10 +106,12 @@ class SyncService:
         repo_name = os.path.basename(self.repo_path.rstrip("\\/"))
         url = f"https://github.com/{username}/{repo_name}"
         self.bus.publish(ActionLog("ACTION", tr(f"配置远程仓库 {url}",
-                                                f"Configuring remote {url}")))
+                                                f"Configuring remote {url}"),
+                                   stage="config"))
         self.git.set_remote(url)
         self.bus.publish(ActionLog("DONE", tr("远程仓库已配置",
-                                              "Remote configured")))
+                                              "Remote configured"),
+                                   stage="config"))
 
     def _collect_updated_items(self) -> dict[str, str]:
         """从 porcelain 提取顶层变化项：{顶层路径: 'A'/'D'}。"""
@@ -132,7 +142,8 @@ class SyncService:
             return 0  # 无暂存内容
         self.bus.publish(ActionLog(
             "DONE", tr(f"已提交 {len(updated_items)} 项更改",
-                       f"Committed {len(updated_items)} change(s)")))
+                       f"Committed {len(updated_items)} change(s)"),
+            stage="commit"))
         return 1
 
     @staticmethod
@@ -155,7 +166,8 @@ class SyncService:
                 raise err
             self.git.set_remote(url)
             self.bus.publish(ActionLog("ACTION", tr("重新推送",
-                                                    "Retrying push")))
+                                                    "Retrying push"),
+                                       stage="push"))
             ok, out = self.git.push(branch, upstream=True)
             if ok:
                 return
@@ -164,7 +176,8 @@ class SyncService:
             # 分叉：本地 1:1 覆盖远程，自动强推
             self.bus.publish(ActionLog("ACTION", tr(
                 "检测到分叉，强制推送（丢弃远程独有提交）",
-                "Diverged; force pushing (discarding remote-only commits)")))
+                "Diverged; force pushing (discarding remote-only commits)"),
+                stage="push"))
             ok, out = self.git.push(branch, upstream=True, force=True)
             if ok:
                 return

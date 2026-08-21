@@ -347,7 +347,7 @@ def test_menu_sync_star_clears_after_push():
     with pytest.raises(StopIteration):
         app.run()
     assert svc.git.commits  # 确实推送了
-    assert "[OK] Push completed" in app._view  # 推送页显示完成日志
+    assert "Push completed (1 change(s))" in app._view  # 推送页会话完成
     joined = "\n".join(out_lines)
     assert "[*Push*]" in joined  # 推送前菜单带 * 标记（CHANGED）
     menu_redraws = [ln for ln in out_lines
@@ -530,8 +530,8 @@ def test_file_ops_push_file_returns_bool():
     assert svc.file_ops.push_file("b.py") is True
 
 
-def test_push_streams_console_logs():
-    """按 Enter 推送：推送页实时显示控制台日志（ActionLog 流），无 [·]/[✓] 标记。"""
+def test_push_renders_stage_progress():
+    """按 Enter 推送：推送页显示阶段进度视图（扫描/提交/推送 ✓），非日志流。"""
     svc = make_services(initialized=True, remote="x", files={"a.py": "1", "b.py": "2"})
     out_lines = []
     app = InteractiveApp(svc, "fake_repo",
@@ -539,15 +539,18 @@ def test_push_streams_console_logs():
                          out=out_lines.append)
     with pytest.raises(StopIteration):
         app.run()
-    joined = "\n".join(out_lines)
-    assert "[·]" not in joined and "[✓]" not in joined  # 无文件状态标记
-    assert "> Scanning changes" in joined               # 过程日志可见
-    assert "[OK] Push completed" in joined              # 完成日志
-    assert svc.git.commits                              # 确实推送了
+    out = app._view
+    lines = out.splitlines()
+    assert "Push completed (2 change(s))" in lines[0]  # 会话头
+    assert any("Scanning changes" in ln and "✓" in ln for ln in lines)
+    assert any("Commit" in ln and "✓" in ln for ln in lines)
+    assert any("Push" in ln and "✓" in ln for ln in lines)
+    assert "[OK]" not in out and "> " not in out      # 无日志流回显
+    assert svc.git.commits                            # 确实推送了
 
 
-def test_push_failure_logs_reason():
-    """推送失败：日志流含 [X] 失败行与错误原因（替代 [✕] 无回显）。"""
+def test_push_failure_renders_error():
+    """推送失败：会话头带失败原因，失败阶段 ✕。"""
     svc = make_services(initialized=True, remote="x", files={"a.py": "1"})
     svc.git.fail_mode = "network"  # 持久推送失败 → SyncError
     out_lines = []
@@ -556,13 +559,15 @@ def test_push_failure_logs_reason():
                          out=out_lines.append)
     with pytest.raises(StopIteration):
         app.run()
-    joined = "\n".join(out_lines)
-    assert "[X]" in joined
-    assert "unable to access" in joined  # 失败原因现在可见
+    out = app._view
+    lines = out.splitlines()
+    assert ("Push failed: "
+            "Network error: check your connection or proxy settings") in lines[0]
+    assert any("Push" in ln and "✕" in ln for ln in lines)  # 失败阶段
 
 
-def test_push_no_changes_streams_logs():
-    """无待推内容（如仅初始化仓库）：仍正常执行，日志流显示初始化/推送步骤。"""
+def test_push_no_changes_renders_stages():
+    """无待推内容（如仅初始化仓库）：仍正常执行，会话含初始化/配置阶段。"""
     svc = make_services(initialized=False, remote=None)
     out_lines = []
     app = InteractiveApp(svc, "fake_repo",
@@ -570,15 +575,16 @@ def test_push_no_changes_streams_logs():
                          out=out_lines.append)
     with pytest.raises(StopIteration):
         app.run()
-    joined = "\n".join(out_lines)
-    assert "·" not in joined and "✓" not in joined
     assert svc.git.initialized  # 仓库已初始化
-    assert "> Initializing git repository" in joined
-    assert "[OK] Push completed" in joined
+    out = app._view
+    lines = out.splitlines()
+    assert any("Init repository" in ln and "✓" in ln for ln in lines)
+    assert any("Config remote" in ln and "✓" in ln for ln in lines)
+    assert "Push completed" in lines[0]
 
 
-def test_push_logs_persist_after_tab_switch():
-    """推送日志常驻推送页；切出再切入后日志仍在（无结果锁定清除逻辑）。"""
+def test_push_session_persists_after_tab_switch():
+    """推送会话常驻推送页；切出再切入后阶段结果仍在。"""
     svc = make_services(initialized=True, remote="x", files={"a.py": "1"})
     out_lines = []
     app = InteractiveApp(svc, "fake_repo",
@@ -586,7 +592,7 @@ def test_push_logs_persist_after_tab_switch():
                          out=out_lines.append)
     with pytest.raises(StopIteration):
         app.run()
-    assert "[OK] Push completed" in app._view  # 切回推送页日志仍在
+    assert "Push completed (1 change(s))" in app._view  # 切回推送页会话仍在
 
 
 def test_enter_swallowed_during_cooldown():
@@ -599,7 +605,7 @@ def test_enter_swallowed_during_cooldown():
     with pytest.raises(StopIteration):
         app.run()
     assert svc.git.fetch_calls == 1  # 第二个 Enter 被吞：未再次刷新/推送
-    assert "[OK] Push completed" in app._view
+    assert "Push completed (1 change(s))" in app._view
 
 
 def test_render_header_skeleton_without_info():

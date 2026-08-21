@@ -62,16 +62,19 @@ class ReleaseService:
             return False
         tag = self.calculate_next_version(self.gh.get_latest_release())
         self.bus.publish(ActionLog("ACTION", tr(f"发布 Release {tag}",
-                                                f"Publishing release {tag}")))
+                                                f"Publishing release {tag}"),
+                                   stage="release"))
         if not self.gh.publish_release(tag, body):
             self.bus.publish(ActionLog("FAIL", tr("Release 发布失败",
-                                                  "Release publish failed")))
+                                                  "Release publish failed"),
+                                       stage="release"))
             return False
         try:
             os.remove(changelog)
         except OSError:
             pass
         self.bus.publish(ActionLog("DONE", tr(f"已发布 {tag}",
-                                              f"Published {tag}")))
+                                              f"Published {tag}"),
+                                   stage="release"))
         self.bus.publish(ReleasePublished(tag, body))
         return True

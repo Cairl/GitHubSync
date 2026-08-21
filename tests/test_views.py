@@ -110,32 +110,33 @@ def test_push_view_no_porcelain_scan():
     assert svc.git.porcelain_calls == base  # 失效重扫同样零扫描
 
 
-def test_push_view_enter_streams_logs():
-    """Enter 推送：日志流实时滚动（ActionLog 步骤 + [OK] 完成），无文件标记。"""
-    svc, view, painted = _make_push_view(initialized=True, remote="x",
-                                         files={"a.py": "1", "b.py": "2"})
+def test_push_view_enter_renders_stages():
+    """Enter 推送：会话视图渲染阶段进度（扫描/提交/推送 ✓ + 完成头行）。"""
+    svc, view, _ = _make_push_view(initialized=True, remote="x",
+                                   files={"a.py": "1", "b.py": "2"})
     view.activate()
     stale = view.handle_key(KEY_ENTER)
-    assert stale == ["pull"]                # 提交历史已变
-    assert svc.git.commits                  # 确实提交
-    assert svc.git.fetch_calls == 1         # fetch 在推送流程内恰好一次
-    joined = "\n".join(painted)
-    assert "> Scanning changes" in joined
-    assert "> Pushing to GitHub" in joined
-    assert "[OK] Committed 2 change(s)" in joined
-    assert "[OK] Push completed" in joined
-    assert "[✓]" not in joined and "[·]" not in joined  # 无状态符号
+    assert stale == ["pull"]                       # 提交历史已变
+    assert svc.git.commits                         # 确实提交
+    assert svc.git.fetch_calls == 1                # fetch 恰好一次
+    out = view.render()
+    lines = out.splitlines()
+    assert "Push completed (2 change(s))" in lines[0]  # 会话头
+    assert any("Scanning changes" in ln and "✓" in ln for ln in lines)
+    assert any("Commit" in ln and "✓" in ln for ln in lines)
+    assert any("Push" in ln and "✓" in ln for ln in lines)
+    assert "[OK]" not in out and "$ git" not in out  # 无日志流回显
 
 
-def test_push_view_logs_persist_across_switch():
-    """日志常驻：切出再切入日志保留（无结果锁定，无需重扫）。"""
+def test_push_view_session_persists_across_switch():
+    """会话常驻：切出再切入，阶段结果仍在（无结果锁定，无需重扫）。"""
     svc, view, _ = _make_push_view(initialized=True, remote="x",
                                    files={"a.py": "1"})
     view.activate()
     view.handle_key(KEY_ENTER)
     view.deactivate()
     view.activate()
-    assert "[OK] Push completed" in view.render()
+    assert "Push completed (1 change(s))" in view.render()
 
 
 def test_push_view_no_changes_still_syncs():
@@ -144,30 +145,41 @@ def test_push_view_no_changes_still_syncs():
     view.activate()
     view.handle_key(KEY_ENTER)
     assert svc.git.initialized
+    out = view.render()
+    lines = out.splitlines()
+    assert "Push completed" in lines[0]
+    assert any("Init repository" in ln and "✓" in ln for ln in lines)
+    assert any("Config remote" in ln and "✓" in ln for ln in lines)
 
 
-def test_push_view_failure_logs_error():
-    """推送失败：日志流含 [X] 失败行与原始错误详情（替代 [✕] 无回显）。"""
-    svc, view, painted = _make_push_view(initialized=True, remote="x",
-                                         files={"a.py": "1"})
+def test_push_view_failure_renders_error():
+    """推送失败：会话头带失败原因，失败阶段 ✕。"""
+    svc, view, _ = _make_push_view(initialized=True, remote="x",
+                                   files={"a.py": "1"})
     svc.git.fail_mode = "network"
     view.activate()
     view.handle_key(KEY_ENTER)
-    joined = "\n".join(painted)
-    assert "[X]" in joined                       # 失败消息行
-    assert "unable to access" in joined          # 失败原因现在可见
+    out = view.render()
+    lines = out.splitlines()
+    assert ("Push failed: "
+            "Network error: check your connection or proxy settings") in lines[0]
+    assert any("Push" in ln and "✕" in ln for ln in lines)      # 失败阶段
+    assert any("Scanning changes" in ln and "✓" in ln for ln in lines)
 
 
-def test_push_view_release_published(tmp_path):
-    """工作区干净 + 本地 changelog 待发布：Enter 发布 Release（日志含已发布）。"""
-    svc, view, painted = _make_push_view(initialized=True, remote="x")
+def test_push_view_release_stage_published(tmp_path):
+    """工作区干净 + 本地 changelog 待发布：会话含 Release 阶段且 ✓。"""
+    svc, view, _ = _make_push_view(initialized=True, remote="x")
     svc.sync.repo_path = str(tmp_path)
     svc.release.repo_path = str(tmp_path)  # ReleaseService 独立持有 repo_path
     (tmp_path / "changelog.md").write_text("notes", encoding="utf-8")
     view.activate()
     view.handle_key(KEY_ENTER)
     assert svc.gh.published                     # Release 确实发布
-    assert "Released" in "\n".join(painted)     # 日志流含发布成功行
+    out = view.render()
+    lines = out.splitlines()
+    assert "Push completed" in lines[0]         # 会话完成头行
+    assert any("Publish release" in ln and "✓" in ln for ln in lines)
 
 
 def test_push_view_empty_shows_hint():

@@ -51,7 +51,7 @@ github_sync.bat          # Windows 启动器（纯批处理，零 PowerShell）�
 │   ├── screen.py        # render_header / render_menu / render_status_line 纯函数
 │   ├── interactive.py   # InteractiveApp：骨架首帧（info=None 零 I/O）+ 非阻塞主循环（poll_key 轮询 + queue 脏标志 drain）+ 状态/版本后台加载 + 顶栏常驻 + 标签页单循环派发
 │   ├── view_base.py     # ViewBase：activate/render/handle_key/invalidate + loading 态（executor 后台加载）
-│   ├── push_view.py     # 推送标签页：待推清单 + [·]/[✓]/[✕] 状态机
+│   ├── push_view.py     # 推送标签页：推送会话阶段进度视图（会话头 + [k/n] 阶段行 + ·/…/✓/✕/- 状态符号）
 │   ├── pull_view.py     # 拉取标签页：本地历史提交，首个 Enter 对齐远程，其余恢复
 │   ├── files_view.py    # 文件标签页：↑↓ 移动，Enter 切换推送/忽略
 │   ├── branch_view.py   # 分支标签页：首行合并到 main，下方分支列表 Enter 切换
@@ -66,7 +66,7 @@ github_sync.bat          # Windows 启动器（纯批处理，零 PowerShell）�
 - `activate()`：切入时调用，首次或失效后才经 executor 踢后台 `_load()`（懒加载 + loading 态），缓存命中零扫描；加载完成回调置标记并触发 `on_loaded`（回调在 worker 线程触发，仅允许线程安全操作如 queue.put，ANSI 输出只在主线程）；
 - `render()`：缓存数据 → 内容区文本，纯函数零 I/O；loading 期间返回空串（留白不显示）；
 - `handle_key(key)`：处理 ↑/↓/Enter，返回需失效的视图 id 列表，主循环统一 `invalidate()` 并对当前视图立即重扫；loading 期间守卫返回 `[]`（含 Enter——空数据不得触发操作）；
-- `deactivate()`：切出时调用（默认无操作；PushView 借此清除推送结果锁定）；
+- `deactivate()`：切出时调用（默认无操作；PushView 会话视图切出保留，可切回查看）；
 - 状态签名（status/change_count/ahead/behind）变化时主循环失效推送与拉取视图，当前视图立即重扫。
 
 ### 依赖规则
@@ -75,7 +75,7 @@ github_sync.bat          # Windows 启动器（纯批处理，零 PowerShell）�
 - **接口定义在 core/protocols.py，实现在 core/git_provider.py / github_provider.py**（依赖倒置，可替换实现）；
 - UI 永不触碰 git/gh 命令（tui/ 与 cli/ 中无 subprocess 调用，全部走 core 服务）；
 - 渲染路径零子进程：`tui/screen.py` 纯函数只读 RepoInfo；
-- 事件驱动：core 服务发布事件（DomainEventBus），表现层订阅刷新；交互模式取消订阅 ActionLog（同步操作无回显，结果由视图状态标记/颜色表达），CLI 仍按 stdout/stderr 契约输出；`core/file_logger.py` 在组合根订阅全部事件 + `core/command.py` 命令钩子，把 TUI 无回显的日志与命令详情统一落盘项目根 `logs/githubsync-<时间戳毫秒>.log`（每次运行一个新会话文件，CLI/TUI、任何被同步项目都汇聚到此目录；`logs/` 由 GitHubSync 自身 .gitignore 排除；1MB 轮转，写失败静默）。
+- 事件驱动：core 服务发布事件（DomainEventBus），表现层订阅刷新；交互模式中 PushView 订阅带 stage 标识的 ActionLog 做结构化阶段回显（CLI 纯文本消费者忽略 stage），CLI 仍按 stdout/stderr 契约输出；`core/file_logger.py` 在组合根订阅全部事件 + `core/command.py` 命令钩子，把 TUI 无回显的日志与命令详情统一落盘项目根 `logs/githubsync-<时间戳毫秒>.log`（每次运行一个新会话文件，CLI/TUI、任何被同步项目都汇聚到此目录；`logs/` 由 GitHubSync 自身 .gitignore 排除；1MB 轮转，写失败静默）。
 
 ### 扩展性约定
 
@@ -176,10 +176,10 @@ python -m main
 - **禁止在渲染路径中执行子进程调用**（`build_screen`/`render_*` 只读缓存）
 
 ### 无回显化（同步操作结果由视图状态表达）
-- 推送：`PushView`（`tui/push_view.py`）状态机——按 Enter 后 `_push_state` 接管视图，所有待推文件标记 `[·]`（灰，上传中）→ 成功 `[✓]`（绿）/ 失败 `[✕]`（红），结果锁定常驻至切出标签或空推送；git 仍为一次 commit + push
+- 推送：`PushView`（`tui/push_view.py`）推送会话阶段进度视图——按 Enter 后按状态预构建阶段清单（init/config/scan/commit/push/release），订阅带 stage 标识的 ActionLog 驱动阶段状态机：`·` 未开始 / `…` 进行中 / `✓` 完成（绿）/ `✕` 失败（红）/ `-` 未执行（灰）；会话头表达整体结果（`推送完成（N 项更改）` / `推送失败: 原因`）；git 仍为一次 commit + push
 - 拉取：`PullView`（`tui/pull_view.py`）通过 `GitProvider.remote_head()` 取远程跟踪引用，本地与远程一致的提交 hash 标浅绿 `COLOR_CYAN`（#ABDFA7，与 [✓] 同色），其余不变色
 - 文件标签页：`FileOpsService.push_file/remove_file` 返回 bool，失败文件行首 `[!]`（红），按钮状态切换即成功指示
-- 失败原因完全无回显：`[✕]`/`[!]` 即全部反馈（排查用 CLI `status`）
+- 失败原因由 i18n 可读消息表达（`推送失败: 网络连接异常…`），原始命令输出落盘 logs/ 供 AI 调试（排查用 CLI `status`）
 
 ## Troubleshooting
 
