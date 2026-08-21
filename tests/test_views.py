@@ -171,10 +171,49 @@ def test_push_view_release_published(tmp_path):
 
 
 def test_push_view_empty_shows_hint():
-    """空日志：推送页显示 Enter 提示行（灰色占位）。"""
+    """空日志：推送页显示差异摘要（CLEAN=已同步）+ Enter 提示行。"""
     svc, view, _ = _make_push_view(initialized=True, remote="x")
     view.activate()
+    out = view.render()
+    assert "synced" in out
+    assert "Press Enter to push" in out
+
+
+def test_push_view_summary_shows_changes():
+    """CHANGED：推送前摘要显示变化数量与明细（(+1 ~2)）。"""
+    svc, view, _ = _make_push_view(initialized=True, remote="x",
+                                   files={"a.py": "1", "b.py": "2"})
+    view.activate()
+    out = view.render()
+    assert "2 changes" in out
+    assert "~2" in out
+    assert "Press Enter to push" in out
+
+
+def test_push_view_summary_shows_ahead():
+    """AHEAD：推送前摘要显示领先提交数。"""
+    svc, view, _ = _make_push_view(initialized=True, remote="x", ahead=1)
+    view.activate()
+    assert "ahead 1" in view.render()
     assert "Press Enter to push" in view.render()
+
+
+def test_push_view_summary_no_repo():
+    """NO_REPO：推送前摘要提示仓库未初始化。"""
+    svc, view, _ = _make_push_view(initialized=False, remote=None)
+    view.activate()
+    assert "not a git repository" in view.render()
+
+
+def test_push_view_summary_release_pending():
+    """CLEAN + Release 待发布：摘要显示 Release pending。"""
+    from core.status import RepoInfo, RepoStatus
+    svc, view, _ = _make_push_view(initialized=True, remote="x")
+    view._get_info = lambda: RepoInfo(
+        status=RepoStatus.CLEAN, branch="main", path="p",
+        release_pending=True)
+    view.activate()
+    assert "Release pending" in view.render()
 
 
 # ── PullView ──

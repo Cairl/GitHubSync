@@ -21,12 +21,12 @@ from typing import Callable
 
 from core.command import register_command_hook
 from core.config import (COLOR_ERROR, COLOR_GRAY, COLOR_PLACEHOLDER,
-                         COLOR_SUCCESS_SOFT, KEY_ENTER)
+                         COLOR_SUCCESS_SOFT, COLOR_WARN, KEY_ENTER)
 from core.events import ActionLog, DomainEventBus, ReleasePublished, SyncFailed
 from core.exceptions import SyncError
 from core.i18n import tr
 from core.protocols import GitProvider
-from core.status import RepoInfo
+from core.status import RepoInfo, RepoStatus
 from core.sync_service import SyncService
 
 from .renderer import markup_to_ansi
@@ -82,9 +82,47 @@ class PushView(ViewBase):
         with self._lock:
             logs = list(self._logs)
         if not logs:
-            return markup_to_ansi(
+            # 推送前提示：差异摘要（状态色）+ Enter 提示行（灰色）
+            summary = self._summary()
+            lines = [summary] if summary else []
+            lines.append(
                 f"[{COLOR_PLACEHOLDER}]{tr('按 Enter 推送', 'Press Enter to push')}[/]")
+            return markup_to_ansi("\n".join(lines))
         return markup_to_ansi("\n".join(logs))
+
+    def _summary(self) -> str:
+        """推送前差异摘要行：按当前状态表达（与 CLI status_line 观感一致）。"""
+        info = self._get_info()
+        if info is None:
+            return ""
+        st = info.status
+        if st == RepoStatus.ERROR:
+            return f"[{COLOR_ERROR}]{tr(f'错误: {info.error}', f'error: {info.error}')}[/]"
+        if st == RepoStatus.NO_REPO:
+            return f"[{COLOR_PLACEHOLDER}]{tr('不是 git 仓库', 'not a git repository')}[/]"
+        if st == RepoStatus.NO_REMOTE:
+            return f"[{COLOR_PLACEHOLDER}]{tr('未配置远程', 'no remote')}[/]"
+        if st == RepoStatus.DIVERGED:
+            return (f"[{COLOR_ERROR}]{tr(f'分叉 (领先 {info.ahead}, 落后 {info.behind})',
+                                         f'diverged (ahead {info.ahead}, behind {info.behind})')}[/]")
+        if st == RepoStatus.AHEAD:
+            return (f"[{COLOR_WARN}]{tr(f'领先 {info.ahead}', f'ahead {info.ahead}')}[/]")
+        if st == RepoStatus.BEHIND:
+            return (f"[{COLOR_WARN}]{tr(f'落后 {info.behind}', f'behind {info.behind}')}[/]")
+        if st == RepoStatus.CHANGED:
+            parts = []
+            if info.added:
+                parts.append(f"+{info.added}")
+            if info.modified:
+                parts.append(f"~{info.modified}")
+            if info.deleted:
+                parts.append(f"-{info.deleted}")
+            detail = f" ({' '.join(parts)})" if parts else ""
+            return (f"[{COLOR_WARN}]{tr(f'{info.change_count} 处变化{detail}',
+                                        f'{info.change_count} changes{detail}')}[/]")
+        if info.release_pending:
+            return f"[{COLOR_WARN}]{tr('Release 待发布', 'Release pending')}[/]"
+        return f"[{COLOR_SUCCESS_SOFT}]{tr('已同步', 'synced')}[/]"
 
     # ── 键处理 ──
     def handle_key(self, key: bytes) -> list[str]:
