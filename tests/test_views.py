@@ -182,6 +182,22 @@ def test_push_view_release_stage_published(tmp_path):
     assert any("Publish release" in ln and "✓" in ln for ln in lines)
 
 
+def test_push_view_compress_hides_skipped(tmp_path):
+    """max_rows 超限：隐藏未执行（skipped）阶段行，会话头与 detail 保留。"""
+    svc, view, _ = _make_push_view(initialized=True, remote="x")
+    svc.sync.repo_path = str(tmp_path)
+    svc.release.repo_path = str(tmp_path)
+    (tmp_path / "changelog.md").write_text("   ", encoding="utf-8")  # 空白：预判有 release 但不发布
+    view._max_rows = lambda: 4   # 头 + 3 行：隐藏 skipped 后一屏内
+    view.activate()
+    view.handle_key(KEY_ENTER)
+    lines = view.render().splitlines()
+    assert "Push completed" in lines[0]                       # 会话头保留
+    assert len(lines) == 4
+    assert not any("Publish release" in ln for ln in lines)   # skipped 阶段隐藏
+    assert any("No changes to commit" in ln for ln in lines)  # detail 保留（同行使行数不变）
+
+
 def test_push_view_empty_shows_hint():
     """空日志：推送页显示差异摘要（CLEAN=已同步）+ Enter 提示行。"""
     svc, view, _ = _make_push_view(initialized=True, remote="x")

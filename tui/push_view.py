@@ -74,6 +74,8 @@ class PushView(ViewBase):
                  get_info: Callable[[], RepoInfo],
                  refresh_status: Callable[[bool], RepoInfo],
                  paint: Callable[[str], None],
+                 patch: Callable[[int, str], None] | None = None,
+                 max_rows: Callable[[], int] | None = None,
                  executor=None, on_loaded=None):
         super().__init__(executor=executor, on_loaded=on_loaded)
         self.sync = sync
@@ -81,9 +83,12 @@ class PushView(ViewBase):
         self._get_info = get_info
         self._refresh_status = refresh_status
         self._paint = paint
+        self._patch = patch          # 定点更新单行（行号 1-based）；None 时退化为整区重绘
+        self._max_rows = max_rows    # 内容区可用行数；超限时压缩保证一屏显示
         self._stages: list[_Stage] = []   # 当前会话阶段
         self._session: str | None = None  # None（无会话）/ running / done / failed
         self._header = ""                 # 会话头（markup）
+        self._last_lines: list[str] | None = None  # 上次渲染行（markup，增量对比基准）
         self._lock = threading.Lock()
         # 事件订阅：sync.run() 主线程同步发布，回调可直绘
         bus.subscribe(ActionLog, self._on_action_log)
@@ -96,25 +101,29 @@ class PushView(ViewBase):
 
     # ── 渲染（纯函数，只读缓存）──
     def _render(self) -> str:
+        return markup_to_ansi("\n".join(self._render_lines()))
+
+    def _render_lines(self) -> list[str]:
+        """当前视图的 markup 行列表；超出 max_rows 时隐藏未执行阶段保证一屏。
+
+        压缩只影响行数（隐藏 skipped 阶段行），阶段 detail 在同一行内保留；
+        会话头永远保留，绝不截断头部。
+        """
         with self._lock:
             stages = list(self._stages)
             session = self._session
             header = self._header
         if session is None:
-            return self._render_idle()
-        lines = [header]
-        n = len(stages)
-        width = (max(get_display_width(s.name) for s in stages) if stages else 0)
-        for i, st in enumerate(stages, 1):
-            sym, color = _STATE_STYLE[st.state]
-            pad = " " * max(0, width - get_display_width(st.name))
-            line = f"  [{i}/{n}] {st.name}{pad} [{color}]{sym}[/]"
-            if st.detail:
-                line += f" {st.detail}"
-            lines.append(line)
-        return markup_to_ansi("\n".join(lines))
+            return self._idle_lines()
+        lines = self._stage_lines(stages, header, skipped=True)
+        limit = self._max_rows() if self._max_rows is not None else None
+        if limit is not None and len(lines) > limit:
+            compact = self._stage_lines(stages, header, skipped=False)
+            if len(compact) <= limit:
+                return compact
+        return lines
 
-    def _render_idle(self) -> str:
+    def _idle_lines(self) -> list[str]:
         """无会话：差异摘要（状态色）+ Enter 提示行（灰色）。"""
         lines = []
         summary = self._summary()
@@ -122,7 +131,26 @@ class PushView(ViewBase):
             lines.append(summary)
         lines.append(
             f"[{COLOR_PLACEHOLDER}]{tr('按 Enter 推送', 'Press Enter to push')}[/]")
-        return markup_to_ansi("\n".join(lines))
+        return lines
+
+    def _stage_lines(self, stages: list[_Stage], header: str,
+                     skipped: bool) -> list[str]:
+        """阶段行渲染：`  [k/n] 阶段名 符号[ 详情]`，符号列按显示宽度对齐。
+
+        skipped=True 时包含「未执行」阶段（-）；False 时隐藏之（序号随之重排）。
+        """
+        lines = [header]
+        active = [s for s in stages if skipped or s.state != "skipped"]
+        n = len(active)
+        width = max((get_display_width(s.name) for s in active), default=0)
+        for i, st in enumerate(active, 1):
+            sym, color = _STATE_STYLE[st.state]
+            pad = " " * max(0, width - get_display_width(st.name))
+            line = f"  [{i}/{n}] {st.name}{pad} [{color}]{sym}[/]"
+            if st.detail:
+                line += f" {st.detail}"
+            lines.append(line)
+        return lines
 
     def _summary(self) -> str:
         """推送前差异摘要行：按当前状态表达（与 CLI status_line 观感一致）。"""
@@ -171,7 +199,7 @@ class PushView(ViewBase):
     def _start_push(self) -> None:
         """开启推送会话：fetch 刷新远程状态 → 构建阶段清单 → 执行同步。
 
-        会话视图先行渲染（推送中… + 全阶段未开始），随后事件驱动刷新。
+        会话视图先行渲染（推送中… + 全阶段未开始），随后事件驱动增量刷新。
         """
         info = self._refresh_status(True)  # fetch 刷新远程状态（分叉/落后检测可靠）
         stages = self._plan_stages(info)
@@ -179,11 +207,30 @@ class PushView(ViewBase):
             self._stages = stages
             self._session = "running"
             self._header = f"[{COLOR_PUSH_PENDING}]{tr('推送中…', 'Pushing…')}[/]"
-        self._paint(self._render())
+        self._refresh()  # 行数变化（摘要 → 会话）：整区重绘
         try:
-            self.sync.run()  # 阶段事件经订阅实时刷新会话视图
+            self.sync.run()  # 阶段事件经订阅增量刷新会话视图
         except SyncError:
             pass  # SyncFailed 事件已标记失败（_on_sync_failed）
+
+    def _refresh(self) -> None:
+        """增量刷新：行数不变则定点更新差异行（不清屏），否则整区重绘。
+
+        阶段状态变化通常只改 1~2 行的符号/文本，定点更新避免推送过程中
+        反复 \x1b[J 清屏重绘的闪烁；会话开始/结束等行数变化场景整区重绘。
+        """
+        lines = self._render_lines()
+        with self._lock:
+            prev = self._last_lines
+            self._last_lines = list(lines)
+        if (self._patch is not None and prev is not None
+                and len(lines) == len(prev)):
+            dirty = [i for i in range(len(lines)) if lines[i] != prev[i]]
+            if dirty:
+                for i in dirty:
+                    self._patch(i + 1, markup_to_ansi(lines[i]))
+            return  # 无变化行则零输出
+        self._paint(markup_to_ansi("\n".join(lines)))
 
     def _plan_stages(self, info: RepoInfo) -> list[_Stage]:
         """按当前状态构建本次推送的阶段清单（与 sync.run 执行顺序一致）。"""
@@ -215,7 +262,7 @@ class PushView(ViewBase):
                 st.state = "done"
                 if event.level == "NOTE":
                     st.detail = event.message
-        self._paint(self._render())
+        self._refresh()
 
     def _on_sync_failed(self, event: SyncFailed) -> None:
         """会话失败：头行带失败原因，进行中/未开始的阶段标失败。"""
@@ -227,7 +274,7 @@ class PushView(ViewBase):
                            if s.state in ("running", "pending")), None)
             if target:
                 target.state = "failed"
-        self._paint(self._render())
+        self._refresh()
 
     def _on_sync_completed(self, event: SyncCompleted) -> None:
         """会话完成：头行带变更数量，未执行阶段标跳过。"""
@@ -244,4 +291,4 @@ class PushView(ViewBase):
             for st in self._stages:
                 if st.state in ("pending", "running"):
                     st.state = "skipped"
-        self._paint(self._render())
+        self._refresh()

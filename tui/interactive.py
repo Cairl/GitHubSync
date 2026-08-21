@@ -101,6 +101,8 @@ class InteractiveApp:
                              get_info=lambda: self._info,
                              refresh_status=self._refresh_status,
                              paint=self._set_view,
+                             patch=self._patch_view,
+                             max_rows=self._content_rows,
                              executor=self._executor, on_loaded=on_loaded),
             "pull": PullView(svc.restore, svc.git, max_rows=self._content_rows,
                              executor=self._executor, on_loaded=on_loaded),
@@ -116,6 +118,22 @@ class InteractiveApp:
         """替换内容区视图块文本并触发增量重绘。"""
         self._view = text
         self._paint()
+
+    def _patch_view(self, line_no: int, text: str) -> None:
+        """定点更新内容区视图块第 line_no 行（1-based），不清屏重绘。
+
+        供行数固定的增量刷新使用（如推送会话阶段状态变化）：同步 _view
+        缓存与去重基准后，仅用 ANSI 定位到该行并整行重写，避免整区
+        \x1b[J 清屏重绘的闪烁。行数变化场景仍走 _set_view 整区重绘。
+        """
+        lines = self._view.split("\n")
+        if not (0 < line_no <= len(lines)):
+            return
+        lines[line_no - 1] = text
+        self._view = "\n".join(lines)
+        self._last_content = self._content_text()  # 同步去重基准
+        y = self._header_lines() + line_no
+        self._out(f"\x1b[{y};1H\x1b[2K  {text}")
 
     def _content_text(self) -> str:
         parts = []
