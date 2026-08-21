@@ -91,154 +91,90 @@ def _make_push_view(**git_kw):
     def refresh(fetch: bool):
         return svc.status.get_status(fetch=fetch)
 
-    view = PushView(svc.sync, svc.git, get_info=lambda: info,
+    view = PushView(svc.sync, svc.git, svc.bus, get_info=lambda: info,
                     refresh_status=refresh, paint=painted.append)
     return svc, view, painted
 
 
-def test_push_view_activate_scans_once():
+def test_push_view_no_porcelain_scan():
+    """日志视图：激活不触发 porcelain 扫描（无文件清单，零 I/O）。"""
     svc, view, _ = _make_push_view(initialized=True, remote="x",
                                    files={"a.py": "1"})
     base = svc.git.porcelain_calls  # 线束构造时 get_status 已计一次
     view.activate()
     view.activate()
-    assert svc.git.porcelain_calls == base + 1  # 懒加载：二次切入零扫描
-    assert "[~] a.py" in view.render()
+    assert svc.git.porcelain_calls == base  # 懒加载不扫描清单
+    assert "Press Enter to push" in view.render()
     view.invalidate()
     view.activate()
-    assert svc.git.porcelain_calls == base + 2  # 失效后重扫
+    assert svc.git.porcelain_calls == base  # 失效重扫同样零扫描
 
 
-def test_push_view_enter_marks_progress_then_done():
+def test_push_view_enter_streams_logs():
+    """Enter 推送：日志流实时滚动（ActionLog 步骤 + [OK] 完成），无文件标记。"""
     svc, view, painted = _make_push_view(initialized=True, remote="x",
                                          files={"a.py": "1", "b.py": "2"})
     view.activate()
     stale = view.handle_key(KEY_ENTER)
     assert stale == ["pull"]                # 提交历史已变
     assert svc.git.commits                  # 确实提交
-    assert svc.git.fetch_calls == 1         # fetch 在 [·] 渲染之后恰好一次
-    assert "[·]" in painted[0]              # 先渲染上传中
-    assert "[✓]" in painted[-1]             # 最终完成标记
-    assert view._push_result is True        # 结果锁定
+    assert svc.git.fetch_calls == 1         # fetch 在推送流程内恰好一次
+    joined = "\n".join(painted)
+    assert "> Scanning changes" in joined
+    assert "> Pushing to GitHub" in joined
+    assert "[OK] Committed 2 change(s)" in joined
+    assert "[OK] Push completed" in joined
+    assert "[✓]" not in joined and "[·]" not in joined  # 无状态符号
 
 
-def test_push_view_result_lock_blocks_rescan_until_deactivate():
+def test_push_view_logs_persist_across_switch():
+    """日志常驻：切出再切入日志保留（无结果锁定，无需重扫）。"""
     svc, view, _ = _make_push_view(initialized=True, remote="x",
                                    files={"a.py": "1"})
     view.activate()
     view.handle_key(KEY_ENTER)
-    calls = svc.git.porcelain_calls
-    view.activate()                         # 锁定期间不重扫
-    assert svc.git.porcelain_calls == calls
-    assert "[✓]" in view.render()           # 结果常驻
-    view.deactivate()                       # 切出清除锁定
+    view.deactivate()
     view.activate()
-    assert svc.git.porcelain_calls > calls  # 切入重扫
-    assert "[✓]" not in view.render()
-
-
-def test_push_view_empty_enter_with_result_clears():
-    """结果锁定期间再按 Enter（无可推内容）：清结果，返回 ["push"]，不再 sync。"""
-    svc, view, _ = _make_push_view(initialized=True, remote="x",
-                                   files={"a.py": "1"})
-    view.activate()
-    view.handle_key(KEY_ENTER)              # 推送，锁定
-    stale = view.handle_key(KEY_ENTER)      # 工作区已干净 → 空推送
-    assert stale == ["push"]
-    assert view._push_result is False
+    assert "[OK] Push completed" in view.render()
 
 
 def test_push_view_no_changes_still_syncs():
-    """无结果锁定 + 无可推内容（如未初始化仓库）：Enter 仍执行 sync（建仓库等）。"""
+    """无结果锁定 + 无可推内容（未初始化仓库）：Enter 仍执行 sync（建仓库等）。"""
     svc, view, _ = _make_push_view(initialized=False, remote=None)
     view.activate()
     view.handle_key(KEY_ENTER)
     assert svc.git.initialized
 
 
-def test_push_view_ahead_placeholder():
-    svc, view, painted = _make_push_view(initialized=True, remote="x", ahead=1)
-    view.activate()
-    view.handle_key(KEY_ENTER)
-    assert "1 local commit" in painted[0]
-
-
-def test_push_view_ahead_clean_tree_initial_shows_files():
-    """AHEAD 且工作区干净：初始渲染显示本地领先提交涉及的文件（而非一句话/空白）。"""
-    svc, view, _ = _make_push_view(
-        initialized=True, remote="x", ahead=1,
-        ahead_diff="M\tcore/sync_service.py\nA\ttests/fakes.py")
-    view.activate()
-    lines = view.render().split("\n")
-    assert "[~] core/sync_service.py" in lines
-    assert "[+] tests/fakes.py" in lines
-
-
-def test_push_view_failure_marks_error():
+def test_push_view_failure_logs_error():
+    """推送失败：日志流含 [X] 失败行与原始错误详情（替代 [✕] 无回显）。"""
     svc, view, painted = _make_push_view(initialized=True, remote="x",
                                          files={"a.py": "1"})
     svc.git.fail_mode = "network"
     view.activate()
     view.handle_key(KEY_ENTER)
-    assert "[✕]" in painted[-1]
+    joined = "\n".join(painted)
+    assert "[X]" in joined                       # 失败消息行
+    assert "unable to access" in joined          # 失败原因现在可见
 
 
-def test_push_view_changelog_bottomed_with_gap():
-    """changelog.md 置底且前置一空行（列表还有其他文件时）。"""
-    svc, view, _ = _make_push_view(initialized=True, remote="x",
-                                   files={"a.py": "1", "changelog.md": "2"})
-    view.activate()
-    lines = view.render().split("\n")
-    assert lines[-1] == "[~] changelog.md"
-    assert lines[-2] == ""                       # 与其他文件空一行
-    assert "[~] a.py" in lines                   # 其余文件保持在上方
-
-
-def test_push_view_changelog_alone_no_gap():
-    """仅 changelog.md 一个待推文件时不插空行。"""
-    svc, view, _ = _make_push_view(initialized=True, remote="x",
-                                   files={"changelog.md": "1"})
-    view.activate()
-    assert view.render().split("\n") == ["[~] changelog.md"]
-
-
-def test_push_view_changelog_bottomed_in_progress():
-    """推送状态行（[·]/[✓]）同样保持 changelog.md 置底 + 空行。"""
-    svc, view, painted = _make_push_view(initialized=True, remote="x",
-                                         files={"a.py": "1", "changelog.md": "2"})
-    view.activate()
-    view.handle_key(KEY_ENTER)
-    assert "[·]" in painted[0]
-    final = painted[-1].split("\n")
-    assert final[-1] == "[✓] changelog.md"
-    assert final[-2] == ""
-    assert "[✓] a.py" in final
-
-
-def test_push_view_injects_local_changelog(tmp_path):
-    """gitignore 隔离后 porcelain 无 changelog 行：本地存在时注入显示（置底）。"""
-    svc, view, _ = _make_push_view(initialized=True, remote="x",
-                                   files={"a.py": "1"})
-    svc.git.gitignore_lines = ["__pycache__/", "changelog.md"]
-    svc.sync.repo_path = str(tmp_path)
-    (tmp_path / "changelog.md").write_text("release notes", encoding="utf-8")
-    view.activate()
-    lines = view.render().split("\n")
-    assert lines[-1] == "[+] changelog.md"   # 注入行（A → [+]）置底
-    assert lines[-2] == ""                    # 与其他文件空一行
-    assert "[~] a.py" in lines
-
-
-def test_push_view_clean_tree_with_changelog_can_push(tmp_path):
-    """工作区干净 + 本地 changelog 待发布：列表显示 changelog，Enter 推送发布。"""
+def test_push_view_release_published(tmp_path):
+    """工作区干净 + 本地 changelog 待发布：Enter 发布 Release（日志含已发布）。"""
     svc, view, painted = _make_push_view(initialized=True, remote="x")
     svc.sync.repo_path = str(tmp_path)
+    svc.release.repo_path = str(tmp_path)  # ReleaseService 独立持有 repo_path
     (tmp_path / "changelog.md").write_text("notes", encoding="utf-8")
     view.activate()
-    assert view.render().split("\n")[-1] == "[+] changelog.md"
     view.handle_key(KEY_ENTER)
-    assert "[✓] changelog.md" in painted[-1]
-    assert view._push_result is True
+    assert svc.gh.published                     # Release 确实发布
+    assert "Released" in "\n".join(painted)     # 日志流含发布成功行
+
+
+def test_push_view_empty_shows_hint():
+    """空日志：推送页显示 Enter 提示行（灰色占位）。"""
+    svc, view, _ = _make_push_view(initialized=True, remote="x")
+    view.activate()
+    assert "Press Enter to push" in view.render()
 
 
 # ── PullView ──
@@ -288,13 +224,6 @@ def test_pull_view_enter_restores_commit():
     view.handle_key(KEY_DOWN)
     view.handle_key(KEY_ENTER)
     assert svc.git.reset_to == "abcdef1234567890"
-
-
-def test_push_view_empty_clean_shows_none():
-    """工作区干净、无 ahead、无 changelog：推送页渲染 none 占位。"""
-    svc, view, _ = _make_push_view(initialized=True, remote="x")
-    view.activate()
-    assert view.render() == "none"
 
 
 def test_pull_view_no_commits():
@@ -503,10 +432,10 @@ def test_empty_state_none_colored_gray(monkeypatch, tmp_path):
     import tui.renderer
     monkeypatch.setattr(tui.renderer, "supports_color", lambda stream: True)
     gray = "\x1b[38;2;99;99;99m"
-    # 推送（clean 无 ahead 无 changelog）
+    # 推送（空日志：Enter 提示行灰色）
     _, push, _ = _make_push_view(initialized=True, remote="x")
     push.activate()
-    assert gray in push.render() and "none" in push.render()
+    assert gray in push.render() and "Press Enter to push" in push.render()
     # 拉取（无提交历史）
     _, pull = _make_pull_view(initialized=True, remote="x", commits=[])
     pull.activate()
@@ -563,7 +492,7 @@ def test_view_enter_noop_while_loading():
     svc = make_services(initialized=True, remote="x", files={"a.py": "1"})
     gate = _ManualExecutor()
     info = svc.status.get_status(fetch=False)
-    view = PushView(svc.sync, svc.git, get_info=lambda: info,
+    view = PushView(svc.sync, svc.git, svc.bus, get_info=lambda: info,
                     refresh_status=lambda f: info, paint=lambda t: None,
                     executor=gate)
     view.activate()

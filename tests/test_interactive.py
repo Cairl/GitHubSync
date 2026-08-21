@@ -347,7 +347,7 @@ def test_menu_sync_star_clears_after_push():
     with pytest.raises(StopIteration):
         app.run()
     assert svc.git.commits  # 确实推送了
-    assert app._views["push"]._push_result is True  # 结果锁定
+    assert "[OK] Push completed" in app._view  # 推送页显示完成日志
     joined = "\n".join(out_lines)
     assert "[*Push*]" in joined  # 推送前菜单带 * 标记（CHANGED）
     menu_redraws = [ln for ln in out_lines
@@ -530,8 +530,8 @@ def test_file_ops_push_file_returns_bool():
     assert svc.file_ops.push_file("b.py") is True
 
 
-def test_push_marks_progress_then_done():
-    """按 Enter 推送：文件标记先 [·] 后 [✓]，且无 ActionLog 回显。"""
+def test_push_streams_console_logs():
+    """按 Enter 推送：推送页实时显示控制台日志（ActionLog 流），无 [·]/[✓] 标记。"""
     svc = make_services(initialized=True, remote="x", files={"a.py": "1", "b.py": "2"})
     out_lines = []
     app = InteractiveApp(svc, "fake_repo",
@@ -540,14 +540,14 @@ def test_push_marks_progress_then_done():
     with pytest.raises(StopIteration):
         app.run()
     joined = "\n".join(out_lines)
-    assert "[·]" in joined  # 上传中标记出现过（带方括号）
-    assert "[✓]" in joined  # 完成标记出现（带方括号）
-    assert "Scanning changes" not in joined  # 无 ActionLog 过程回显
-    assert svc.git.commits   # 确实推送了
+    assert "[·]" not in joined and "[✓]" not in joined  # 无文件状态标记
+    assert "> Scanning changes" in joined               # 过程日志可见
+    assert "[OK] Push completed" in joined              # 完成日志
+    assert svc.git.commits                              # 确实推送了
 
 
-def test_push_failure_marks_error_no_reason():
-    """推送失败：所有文件 [✕]，不显示失败原因（完全无回显）。"""
+def test_push_failure_logs_reason():
+    """推送失败：日志流含 [X] 失败行与错误原因（替代 [✕] 无回显）。"""
     svc = make_services(initialized=True, remote="x", files={"a.py": "1"})
     svc.git.fail_mode = "network"  # 持久推送失败 → SyncError
     out_lines = []
@@ -557,13 +557,12 @@ def test_push_failure_marks_error_no_reason():
     with pytest.raises(StopIteration):
         app.run()
     joined = "\n".join(out_lines)
-    assert "[✕]" in joined
-    assert "unable to access" not in joined  # 无失败原因
-    assert "Scanning changes" not in joined  # 无过程回显
+    assert "[X]" in joined
+    assert "unable to access" in joined  # 失败原因现在可见
 
 
-def test_push_no_changes_no_status_markers():
-    """无待推文件（如仅初始化仓库）时不显示状态标记，仍正常执行。"""
+def test_push_no_changes_streams_logs():
+    """无待推内容（如仅初始化仓库）：仍正常执行，日志流显示初始化/推送步骤。"""
     svc = make_services(initialized=False, remote=None)
     out_lines = []
     app = InteractiveApp(svc, "fake_repo",
@@ -574,26 +573,12 @@ def test_push_no_changes_no_status_markers():
     joined = "\n".join(out_lines)
     assert "·" not in joined and "✓" not in joined
     assert svc.git.initialized  # 仓库已初始化
+    assert "> Initializing git repository" in joined
+    assert "[OK] Push completed" in joined
 
 
-def test_push_ahead_clean_tree_shows_placeholder():
-    """AHEAD 且工作区干净（变更已提交未推送）：推送视图显示本地提交占位行而非空白。"""
-    # ahead=1 + 无 files → porcelain 为空 → 状态 AHEAD，工作区干净
-    svc = make_services(initialized=True, remote="x", ahead=1)
-    out_lines = []
-    app = InteractiveApp(svc, "fake_repo",
-                         key_source=scripted([KEY_ENTER]),
-                         out=out_lines.append)
-    with pytest.raises(StopIteration):
-        app.run()
-    joined = "\n".join(out_lines)
-    assert "[·]" in joined  # 上传中占位标记
-    assert "[✓]" in joined  # 完成标记
-    assert "1 local commit" in joined  # 占位行表达推送本地提交
-
-
-def test_push_result_cleared_after_tab_switch():
-    """推送结果 [✓] 常驻于推送页；切出再切入后清除（重扫为干净清单）。"""
+def test_push_logs_persist_after_tab_switch():
+    """推送日志常驻推送页；切出再切入后日志仍在（无结果锁定清除逻辑）。"""
     svc = make_services(initialized=True, remote="x", files={"a.py": "1"})
     out_lines = []
     app = InteractiveApp(svc, "fake_repo",
@@ -601,22 +586,7 @@ def test_push_result_cleared_after_tab_switch():
                          out=out_lines.append)
     with pytest.raises(StopIteration):
         app.run()
-    assert app._views["push"]._push_result is False  # 切出已清锁定
-    assert "[✓]" not in app._view  # 切回推送页后重扫，结果视图已消失
-
-
-def test_push_result_cleared_on_empty_push():
-    """推送结果锁定期间再次按 Enter（无可推内容）：旧结果清除，重扫为空。"""
-    svc = make_services(initialized=True, remote="x", files={"a.py": "1"})
-    out_lines = []
-    app = InteractiveApp(svc, "fake_repo",
-                         key_source=scripted([KEY_ENTER, KEY_ENTER]),
-                         out=out_lines.append,
-                         cooldown=0)  # 测试连按语义，关闭冷却期
-    with pytest.raises(StopIteration):
-        app.run()
-    assert app._views["push"]._push_result is False
-    assert "[✓]" not in app._view
+    assert "[OK] Push completed" in app._view  # 切回推送页日志仍在
 
 
 def test_enter_swallowed_during_cooldown():
@@ -628,9 +598,8 @@ def test_enter_swallowed_during_cooldown():
                          out=out_lines.append)  # 默认 cooldown=1.0
     with pytest.raises(StopIteration):
         app.run()
-    # 第二个 Enter 被吞：推送结果锁定未清除（空推送清锁定逻辑未触发）
-    assert app._views["push"]._push_result is True
-    assert "[✓]" in app._view
+    assert svc.git.fetch_calls == 1  # 第二个 Enter 被吞：未再次刷新/推送
+    assert "[OK] Push completed" in app._view
 
 
 def test_render_header_skeleton_without_info():

@@ -97,7 +97,7 @@ class InteractiveApp:
         # 视图注册表：构造即建（零扫描），数据懒加载在 activate（异步，loading 态）
         on_loaded = lambda: self._events.put(("view", None))
         self._views: dict[str, ViewBase] = {
-            "push": PushView(svc.sync, svc.git,
+            "push": PushView(svc.sync, svc.git, svc.bus,
                              get_info=lambda: self._info,
                              refresh_status=self._refresh_status,
                              paint=self._set_view,
