@@ -96,8 +96,14 @@ class SyncService:
                                                 "Pushing to GitHub"),
                                    stage="push"))
         self._push_with_recovery()
-        self.bus.publish(ActionLog("DONE", tr("推送完成", "Push completed"),
-                                   stage="push"))
+        if updated_items:
+            detail = tr(f"{len(updated_items)} 项更改",
+                        f"{len(updated_items)} change(s)")
+            push_done = tr(f"推送完成（{detail}）",
+                           f"Push completed ({detail})")
+        else:
+            push_done = tr("推送完成", "Push completed")
+        self.bus.publish(ActionLog("DONE", push_done, stage="push"))
 
         # 推送后发布 Release：从本地读取 changelog.md 内容发布；
         # changelog.md 不入库（gitignore 隔离），远端无残留，无需提交删除

@@ -28,7 +28,6 @@ from core.config import (COLOR_ERROR, COLOR_GRAY, COLOR_PLACEHOLDER,
                          COLOR_PUSH_PENDING, COLOR_SUCCESS_SOFT, KEY_ENTER)
 from core.events import (ActionLog, DomainEventBus, SyncCompleted, SyncFailed)
 from core.exceptions import SyncError
-from core.i18n import tr
 from core.protocols import GitProvider
 from core.status import RepoInfo, RepoStatus
 from core.sync_service import SyncService
@@ -258,16 +257,9 @@ class PushView(ViewBase):
         self._refresh()
 
     def _on_sync_completed(self, event: SyncCompleted) -> None:
-        """会话完成：完成消息进日志流，未执行阶段标跳过。"""
+        """会话完成：未执行阶段标跳过（完成消息由 push 阶段 DONE 事件表达）。"""
         with self._lock:
             self._session = "done"
-            n = len(event.updated_items)
-            if n:
-                detail = tr(f"{n} 项更改", f"{n} change(s)")
-                message = tr(f"推送完成（{detail}）", f"Push completed ({detail})")
-            else:
-                message = tr("推送完成", "Push completed")
-            self._append_log("DONE", message)  # 纯文本消息，避免嵌套 markup
             for st in self._stages:
                 if st.state in ("pending", "running"):
                     st.state = "skipped"
