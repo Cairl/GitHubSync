@@ -111,7 +111,7 @@ def test_push_view_no_porcelain_scan():
 
 
 def test_push_view_enter_renders_result():
-    """Enter 推送：动作行显示最后结果（推送完成 N 项更改）。"""
+    """Enter 推送：阶段行末行为最后结果（推送完成 N 项更改），阶段留痕。"""
     svc, view, _ = _make_push_view(initialized=True, remote="x",
                                    files={"a.py": "1", "b.py": "2"})
     view.activate()
@@ -120,7 +120,10 @@ def test_push_view_enter_renders_result():
     assert svc.git.commits                         # 确实提交
     assert svc.git.fetch_calls == 1                # fetch 恰好一次
     out = view.render()
-    assert "✓ Push completed (2 change(s))" in out.splitlines()[0]
+    lines = out.splitlines()
+    assert "✓ Push completed (2 change(s))" in lines[-1]      # 末行=最后结果
+    assert "✓ Scanning complete 2 change(s)" in out           # 扫描阶段留痕
+    assert "✓ Committed 2 change(s)" in out                   # 提交阶段留痕
     assert "[OK]" not in out and "$ git" not in out  # 无命令回显
 
 
@@ -141,23 +144,24 @@ def test_push_view_no_changes_still_syncs():
     view.activate()
     view.handle_key(KEY_ENTER)
     assert svc.git.initialized
-    assert "Push completed" in view.render().splitlines()[0]
+    assert "Push completed" in view.render().splitlines()[-1]
 
 
 def test_push_view_failure_renders_error():
-    """推送失败：动作行显示失败原因。"""
+    """推送失败：阶段行保留，末尾追加失败原因行。"""
     svc, view, _ = _make_push_view(initialized=True, remote="x",
                                    files={"a.py": "1"})
     svc.git.fail_mode = "network"
     view.activate()
     view.handle_key(KEY_ENTER)
     out = view.render()
-    assert "✕" in out.splitlines()[0]
-    assert "Network error" in out.splitlines()[0]
+    assert "✕" in out.splitlines()[-1]
+    assert "Network error" in out.splitlines()[-1]
+    assert "Scanning complete" in out              # 失败前阶段留痕可回溯
 
 
-def test_push_view_progress_not_rendered():
-    """PROGRESS 实时进度不渲染；里程碑消息覆盖动作行。"""
+def test_push_view_progress_appended_to_action_line():
+    """PROGRESS 实时进度拼到进行中动作行尾（覆盖旧进度）；完成覆盖为结果。"""
     from core.events import ActionLog
     svc, view, _ = _make_push_view(initialized=True, remote="x",
                                    files={"a.py": "1"})
@@ -166,29 +170,31 @@ def test_push_view_progress_not_rendered():
         view._session = "running"
     svc.bus.publish(ActionLog("ACTION", "Pushing to GitHub", stage="push"))
     assert "> Pushing to GitHub" in view.render().splitlines()[0]
+    svc.bus.publish(ActionLog("PROGRESS", "42% (5/12)", stage="push"))
     svc.bus.publish(ActionLog("PROGRESS", "100% (12/12) · 1.20 MiB",
                               stage="push"))
     out = view.render()
-    assert "> Pushing to GitHub" in out.splitlines()[0]  # 进度不覆盖动作行
-    assert "100% (12/12) · 1.20 MiB" not in out
+    assert "> Pushing to GitHub 100% (12/12) · 1.20 MiB" in out.splitlines()[0]
+    assert "42% (5/12)" not in out              # 旧进度被覆盖不累积
     svc.bus.publish(ActionLog("DONE", "Push completed (1 change(s))",
                               stage="push"))
     assert "✓ Push completed (1 change(s))" in view.render().splitlines()[0]
 
 
 def test_push_view_progress_via_full_sync(tmp_path):
-    """真实推送流程：进度不渲染，动作行显示最后结果。"""
-    svc, view, _ = _make_push_view(initialized=True, remote="x",
-                                   files={"a.py": "1", "b.py": "2"})
+    """真实推送流程：push 进度拼到动作行渲染帧；完成后被结果覆盖。"""
+    svc, view, painted = _make_push_view(initialized=True, remote="x",
+                                         files={"a.py": "1", "b.py": "2"})
     svc.sync.repo_path = str(tmp_path)
     svc.release.repo_path = str(tmp_path)
     svc.git.push_progress = ["16% (1/6)", "100% (2/2) · 512 B"]   # fake 模拟 push 进度
     view.activate()
     view.handle_key(KEY_ENTER)
+    # 推送过程中的渲染帧可见最新进度（16% 被 100% 覆盖，仅最新帧出现）
+    assert any("Pushing to GitHub 100% (2/2) · 512 B" in p for p in painted)
     out = view.render()
-    assert "16% (1/6)" not in out            # 进度不占行
-    assert "512 B" not in out                # 进度 detail 不渲染
-    assert "✓ Push completed (2 change(s))" in out.splitlines()[0]
+    assert "16% (1/6)" not in out            # 完成后旧进度不残留
+    assert "✓ Push completed (2 change(s))" in out.splitlines()[-1]
 
 
 def test_push_view_release_stage_published(tmp_path):
@@ -202,12 +208,13 @@ def test_push_view_release_stage_published(tmp_path):
     view.handle_key(KEY_ENTER)
     assert svc.gh.published                     # Release 确实发布
     out = view.render()
-    assert "Published" in out.splitlines()[0]   # 动作行=最后结果（release 发布）
+    assert "Published" in out.splitlines()[-1]  # 末行=最后阶段（release 发布）
 
 
-def test_push_view_single_line_layout(tmp_path):
-    """单行动作行布局：行数恒定 1 + 空行占位，无阶段行。"""
-    svc, view, _ = _make_push_view(initialized=True, remote="x")
+def test_push_view_stage_lines_layout(tmp_path):
+    """阶段行布局：每阶段一行累积（扫描/提交/推送），完成留痕不覆盖。"""
+    svc, view, _ = _make_push_view(initialized=True, remote="x",
+                                   files={"a.py": "1"})
     svc.sync.repo_path = str(tmp_path)
     svc.release.repo_path = str(tmp_path)
     svc.status.repo_path = str(tmp_path)
@@ -216,10 +223,10 @@ def test_push_view_single_line_layout(tmp_path):
     view.activate()
     view.handle_key(KEY_ENTER)
     lines = view._render_lines()
-    assert len(lines) == 5                                     # 1 动作行 + 4 空行
-    assert any("Push completed" in ln for ln in lines)         # 动作行=结果
-    assert not any("Scan" in ln or "Commit" in ln or "Push" in ln
-                   for ln in lines if "Push completed" not in ln)  # 无阶段行
+    assert "Scanning complete" in lines[0]              # 扫描阶段留痕
+    assert "Committed 1 change(s)" in lines[1]          # 提交阶段留痕
+    assert "Push completed (1 change(s))" in lines[2]   # 推送阶段留痕
+    assert len(lines) <= 5                              # 不超内容区可用行
 
 
 def test_push_view_empty_shows_hint():
@@ -255,18 +262,18 @@ def test_push_view_no_repo_idle_empty():
     assert "not a git repository" not in out
 
 
-def test_push_view_idle_to_session_same_rowcount():
-    """开屏一页流与会话行数一致：Enter 后走定点更新，无整屏跳变。"""
+def test_push_view_idle_to_session_grows_lines():
+    """开屏单行变更数；Enter 后阶段行逐行累积（行数增长）。"""
     svc, view, _ = _make_push_view(initialized=True, remote="x",
                                    files={"a.py": "1", "b.py": "2"})
     view._max_rows = lambda: 6
     view.activate()
-    idle_lines = view._render_lines()          # 空态（含空行占位）
+    idle_lines = view._render_lines()          # 空态：单行变更数
+    assert "2 change(s)" in idle_lines[0]
     view.handle_key(KEY_ENTER)
     session_lines = view._render_lines()
-    assert len(idle_lines) == len(session_lines) == 6  # 行数恒定
-    assert "2 change(s)" in idle_lines[0]   # 开屏显示变更数
-    assert "Push completed" in session_lines[0]
+    assert len(session_lines) > len(idle_lines)     # 阶段行累积增长
+    assert "Push completed" in session_lines[-1]    # 末行=结果
 
 
 # ── PullView ──
