@@ -222,6 +222,7 @@ def test_push_view_release_stage_published(tmp_path):
     svc, view, _ = _make_push_view(initialized=True, remote="x")
     svc.sync.repo_path = str(tmp_path)
     svc.release.repo_path = str(tmp_path)  # ReleaseService 独立持有 repo_path
+    svc.status.repo_path = str(tmp_path)   # StatusService 探测 release_pending 用
     (tmp_path / "changelog.md").write_text("notes", encoding="utf-8")
     view.activate()
     view.handle_key(KEY_ENTER)
@@ -238,6 +239,7 @@ def test_push_view_compress_hides_skipped(tmp_path):
     svc, view, _ = _make_push_view(initialized=True, remote="x")
     svc.sync.repo_path = str(tmp_path)
     svc.release.repo_path = str(tmp_path)
+    svc.status.repo_path = str(tmp_path)
     (tmp_path / "changelog.md").write_text("   ", encoding="utf-8")  # 空白：预判有 release 但不发布
     view._max_rows = lambda: 4   # 头 + 摘要 + 2 行日志窗口
     view.activate()
@@ -251,49 +253,51 @@ def test_push_view_compress_hides_skipped(tmp_path):
 
 
 def test_push_view_empty_shows_hint():
-    """空日志：推送页显示差异摘要（CLEAN=已同步）+ Enter 提示行。"""
+    """空会话：推送页显示提示头 + 预判阶段摘要（无差异摘要行）。"""
     svc, view, _ = _make_push_view(initialized=True, remote="x")
     view.activate()
     out = view.render()
-    assert "synced" in out
-    assert "Press Enter to push" in out
+    assert "Press Enter to push" in out.splitlines()[0]  # 提示头
+    assert "[· Scan]" in out                              # 预判阶段摘要
+    assert "[· Commit]" in out
+    assert "[· Push]" in out
 
 
-def test_push_view_summary_shows_changes():
-    """CHANGED：推送前摘要显示变化数量与明细（(+1 ~2)）。"""
-    svc, view, _ = _make_push_view(initialized=True, remote="x",
-                                   files={"a.py": "1", "b.py": "2"})
-    view.activate()
-    out = view.render()
-    assert "2 changes" in out
-    assert "~2" in out
-    assert "Press Enter to push" in out
-
-
-def test_push_view_summary_shows_ahead():
-    """AHEAD：推送前摘要显示领先提交数。"""
-    svc, view, _ = _make_push_view(initialized=True, remote="x", ahead=1)
-    view.activate()
-    assert "ahead 1" in view.render()
-    assert "Press Enter to push" in view.render()
-
-
-def test_push_view_summary_no_repo():
-    """NO_REPO：推送前摘要提示仓库未初始化。"""
+def test_push_view_empty_preplans_stages_by_status():
+    """NO_REPO：空会话预判 init/config 阶段（与推送阶段一致，不跳界面）。"""
     svc, view, _ = _make_push_view(initialized=False, remote=None)
     view.activate()
-    assert "not a git repository" in view.render()
+    out = view.render()
+    assert "[· Init]" in out
+    assert "[· Config]" in out
+    assert "[· Scan]" in out
+    assert "not a git repository" not in out  # 不再显示差异摘要
 
 
-def test_push_view_summary_release_pending():
-    """CLEAN + Release 待发布：摘要显示 Release pending。"""
-    from core.status import RepoInfo, RepoStatus
+def test_push_view_release_pending_preplans_release(tmp_path):
+    """changelog 待发布：空会话预判含 Release 阶段。"""
     svc, view, _ = _make_push_view(initialized=True, remote="x")
-    view._get_info = lambda: RepoInfo(
-        status=RepoStatus.CLEAN, branch="main", path="p",
-        release_pending=True)
+    svc.sync.repo_path = str(tmp_path)
+    svc.release.repo_path = str(tmp_path)
+    svc.status.repo_path = str(tmp_path)
+    (tmp_path / "changelog.md").write_text("notes", encoding="utf-8")
+    view._get_info = lambda: svc.status.get_status(fetch=False)  # 动态取（探测新路径）
     view.activate()
-    assert "Release pending" in view.render()
+    assert "[· Release]" in view.render()
+
+
+def test_push_view_idle_to_session_same_rowcount():
+    """开屏一页流与会话行数一致：Enter 后走定点更新，无整屏跳变。"""
+    svc, view, _ = _make_push_view(initialized=True, remote="x",
+                                   files={"a.py": "1", "b.py": "2"})
+    view._max_rows = lambda: 6
+    view.activate()
+    idle_lines = view._render_lines()          # 空态一页流（含空行占位）
+    view.handle_key(KEY_ENTER)
+    session_lines = view._render_lines()
+    assert len(idle_lines) == len(session_lines) == 6  # 行数恒定
+    assert "Press Enter to push" in idle_lines[0]
+    assert "Push completed" in session_lines[0]
 
 
 # ── PullView ──

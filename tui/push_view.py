@@ -1,6 +1,8 @@
-"""推送标签页：推送会话一页流视图（阶段摘要 + 实时日志流，非分步回显）。
+"""推送标签页：推送会话一页流视图（阶段摘要 + 实时日志流，全程一屏）。
 
-Enter 执行推送时，内容区在一页内展示完整推送会话：
+开屏即一页流框架，Enter 推送前后不跳界面：
+- 无会话：提示头「按 Enter 推送」+ 按当前状态预判的待执行阶段摘要
+  （`[· Scan] [· Commit] [· Push]`）+ 空日志窗口，与推送会话行数一致；
 - 会话头：整体状态（推送中… / 推送完成（N 项更改）/ 推送失败：原因）；
 - 阶段摘要：一行横排展示全部阶段状态（`[✓ Scan] [✓ Commit] [… Push]`
   状态符号 + 英文短名，一目了然）；
@@ -15,7 +17,6 @@ Enter 执行推送时，内容区在一页内展示完整推送会话：
 扫描到 N 项更改、已提交 N 项更改、push 对象写入百分比（git push
 --progress 流式解析），既更新阶段摘要 detail，也追加进日志流。
 
-空态（无会话）：差异摘要 + 「按 Enter 推送」提示（见 _summary）。
 每次 Enter 开启新会话（覆盖上一次结果视图）；切出保留当前会话可切回查看。
 """
 from __future__ import annotations
@@ -25,13 +26,12 @@ from dataclasses import dataclass
 from typing import Callable
 
 from core.config import (COLOR_ERROR, COLOR_GRAY, COLOR_PLACEHOLDER,
-                         COLOR_PUSH_PENDING, COLOR_SUCCESS_SOFT, COLOR_WARN,
-                         KEY_ENTER)
+                         COLOR_PUSH_PENDING, COLOR_SUCCESS_SOFT, KEY_ENTER)
 from core.events import (ActionLog, DomainEventBus, SyncCompleted, SyncFailed)
 from core.exceptions import SyncError
 from core.i18n import tr
 from core.protocols import GitProvider
-from core.status import (RepoInfo, RepoStatus, changelog_pending)
+from core.status import RepoInfo, RepoStatus
 from core.sync_service import SyncService
 
 from .renderer import markup_to_ansi
@@ -121,8 +121,9 @@ class PushView(ViewBase):
     def _render_lines(self) -> list[str]:
         """当前视图的 markup 行列表：会话头 + 阶段摘要行 + 日志流窗口。
 
-        会话中行数恒定 = 2 + 日志窗口（不足补空行占位），日志追加/阶段
-        变化只改内容不改行数，增量刷新可走定点更新不清屏。
+        行数恒定 = 2 + 日志窗口（不足补空行占位）。无会话时同样渲染一页流
+        框架（提示头 + 按当前状态预判的待执行阶段 + 空日志窗口），与推送
+        会话行数一致——开屏即一页流，Enter 后仅增量更新，无整屏跳变。
         """
         with self._lock:
             stages = list(self._stages)
@@ -130,7 +131,12 @@ class PushView(ViewBase):
             header = self._header
             logs = list(self._log_lines)
         if session is None:
-            return self._idle_lines()
+            # 无会话：一页流框架（提示头 + 预判阶段 + 空日志窗口）
+            info = self._get_info()
+            stages = self._plan_stages(info) if info is not None else []
+            header = (f"[{COLOR_PLACEHOLDER}]"
+                      f"{tr('按 Enter 推送', 'Press Enter to push')}[/]")
+            logs = []
         limit = self._max_rows() if self._max_rows is not None else None
         window = max(1, limit - 2) if limit is not None else None
         if window is not None:
@@ -139,16 +145,6 @@ class PushView(ViewBase):
         else:
             padded = logs
         return [header, self._stage_summary_line(stages)] + padded
-
-    def _idle_lines(self) -> list[str]:
-        """无会话：差异摘要（状态色）+ Enter 提示行（灰色）。"""
-        lines = []
-        summary = self._summary()
-        if summary:
-            lines.append(summary)
-        lines.append(
-            f"[{COLOR_PLACEHOLDER}]{tr('按 Enter 推送', 'Press Enter to push')}[/]")
-        return lines
 
     def _stage_summary_line(self, stages: list[_Stage]) -> str:
         """阶段摘要行：`  [✓ Scan] [… Push]` 横排，全部阶段一屏可见。"""
@@ -166,40 +162,6 @@ class PushView(ViewBase):
     def _append_log(self, level: str, message: str) -> None:
         """追加日志流行（已持锁调用）。"""
         self._log_lines.append(self._log_markup(level, message))
-
-    def _summary(self) -> str:
-        """推送前差异摘要行：按当前状态表达（与 CLI status_line 观感一致）。"""
-        info = self._get_info()
-        if info is None:
-            return ""
-        st = info.status
-        if st == RepoStatus.ERROR:
-            return f"[{COLOR_ERROR}]{tr(f'错误: {info.error}', f'error: {info.error}')}[/]"
-        if st == RepoStatus.NO_REPO:
-            return f"[{COLOR_PLACEHOLDER}]{tr('不是 git 仓库', 'not a git repository')}[/]"
-        if st == RepoStatus.NO_REMOTE:
-            return f"[{COLOR_PLACEHOLDER}]{tr('未配置远程', 'no remote')}[/]"
-        if st == RepoStatus.DIVERGED:
-            return (f"[{COLOR_ERROR}]{tr(f'分叉 (领先 {info.ahead}, 落后 {info.behind})',
-                                         f'diverged (ahead {info.ahead}, behind {info.behind})')}[/]")
-        if st == RepoStatus.AHEAD:
-            return (f"[{COLOR_WARN}]{tr(f'领先 {info.ahead}', f'ahead {info.ahead}')}[/]")
-        if st == RepoStatus.BEHIND:
-            return (f"[{COLOR_WARN}]{tr(f'落后 {info.behind}', f'behind {info.behind}')}[/]")
-        if st == RepoStatus.CHANGED:
-            parts = []
-            if info.added:
-                parts.append(f"+{info.added}")
-            if info.modified:
-                parts.append(f"~{info.modified}")
-            if info.deleted:
-                parts.append(f"-{info.deleted}")
-            detail = f" ({' '.join(parts)})" if parts else ""
-            return (f"[{COLOR_WARN}]{tr(f'{info.change_count} 处变化{detail}',
-                                        f'{info.change_count} changes{detail}')}[/]")
-        if info.release_pending:
-            return f"[{COLOR_WARN}]{tr('Release 待发布', 'Release pending')}[/]"
-        return f"[{COLOR_SUCCESS_SOFT}]{tr('已同步', 'synced')}[/]"
 
     # ── 键处理 ──
     def handle_key(self, key: bytes) -> list[str]:
@@ -250,14 +212,17 @@ class PushView(ViewBase):
         self._paint(markup_to_ansi("\n".join(lines)))
 
     def _plan_stages(self, info: RepoInfo) -> list[_Stage]:
-        """按当前状态构建本次推送的阶段清单（与 sync.run 执行顺序一致）。"""
+        """按当前状态构建本次推送的阶段清单（与 sync.run 执行顺序一致）。
+
+        用 RepoInfo.release_pending（状态服务已算好的字段），渲染路径零 I/O。
+        """
         tokens: list[str] = []
         if info.status == RepoStatus.NO_REPO:
             tokens += ["init", "config"]
         elif not info.remote_url:
             tokens.append("config")
         tokens += ["scan", "commit", "push"]
-        if changelog_pending(self.sync.repo_path):
+        if info.release_pending:
             tokens.append("release")
         return [_Stage(token=t) for t in tokens]
 
