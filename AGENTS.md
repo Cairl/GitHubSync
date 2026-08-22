@@ -52,7 +52,7 @@ github_sync.bat          # Windows 启动器（纯批处理，零 PowerShell）�
 │   ├── screen.py        # render_header / render_menu / render_status_line 纯函数
 │   ├── interactive.py   # InteractiveApp：骨架首帧（info=None 零 I/O）+ 非阻塞主循环（poll_key 轮询 + queue 脏标志 drain）+ 状态/版本后台加载 + 顶栏常驻 + 标签页单循环派发
 │   ├── view_base.py     # ViewBase：activate/render/handle_key/invalidate + loading 态（executor 后台加载）
-│   ├── push_view.py     # 推送标签页：推送会话阶段行累积回显（每阶段一行，完成留痕）
+│   ├── push_view.py     # 推送标签页：激活即预扫描（Enter 前真实跑完）+ 推送会话阶段行累积回显（完成留痕）
 │   ├── pull_view.py     # 拉取标签页：本地历史提交，首个 Enter 对齐远程，其余恢复
 │   ├── files_view.py    # 文件标签页：↑↓ 移动，Enter 切换推送/忽略
 │   ├── branch_view.py   # 分支标签页：首行合并到 main，下方分支列表 Enter 切换
@@ -177,7 +177,7 @@ python -m main
 - **禁止在渲染路径中执行子进程调用**（`build_screen`/`render_*` 只读缓存）
 
 ### 无回显化（同步操作结果由视图状态表达）
-- 推送：`PushView`（`tui/push_view.py`）推送会话阶段行累积回显——无会话时预显示扫描结论两行（`✓ 扫描完成` + 第二行 `N 处变化` / `> 没有需要提交的更改`，有无变化格式一致仅内容不同，免 Enter 即见；未初始化/错误状态为空），按 Enter 前即可确认本次变更；推送过程每个阶段一行（初始化/配置/扫描/提交/推送/发布）按出现顺序累积：进行中行 `> 当前动作`、完成行 `✓ 结果` 留痕不覆盖、失败行 `✕ 原因`，push 阶段实时进度（百分比 + 对象数，`git push --progress` 流式解析）拼在当前动作行尾并覆盖旧进度；结束后阶段行保留可回溯，整体失败末尾追加 `✕ 失败原因`；git 仍为一次 commit + push
+- 推送：`PushView`（`tui/push_view.py`）激活即在后台预执行扫描阶段（`SyncService.scan()`：gitignore 隔离→暂存→收集变更项；worker 线程发布的 ActionLog 先入缓冲区，完成后统一应用为 ready 会话），完成即免 Enter 显示真实扫描结论行（`✓ 扫描完成`(+ N 项更改) / `> 没有需要提交的更改`）；未初始化/错误状态不预扫描（留空）。Enter 续跑复用预扫描结果（`sync.run(reuse_scan=True)`），扫描不执行第二遍，提交/推送/发布每阶段一行按出现顺序累积：进行中行 `> 当前动作`、完成行 `✓ 结果` 留痕不覆盖、失败行 `✕ 原因`，push 阶段实时进度（百分比 + 对象数，`git push --progress` 流式解析）拼在当前动作行尾并覆盖旧进度；结束后阶段行保留可回溯（running/done/failed 会话失效重扫时保留不覆盖），整体失败末尾追加 `✕ 失败原因`；git 仍为一次 commit + push
 - 拉取：`PullView`（`tui/pull_view.py`）通过 `GitProvider.remote_head()` 取远程跟踪引用，本地与远程一致的提交 hash 标浅绿 `COLOR_CYAN`（#ABDFA7，与 [✓] 同色），其余不变色
 - 文件标签页：`FileOpsService.push_file/remove_file` 返回 bool，失败文件行首 `[!]`（红），按钮状态切换即成功指示
 - 失败原因由 i18n 可读消息表达（`推送失败: 网络连接异常…`），原始命令输出落盘 logs/ 供 AI 调试（排查用 CLI `status`）

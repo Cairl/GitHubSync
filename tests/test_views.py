@@ -96,18 +96,37 @@ def _make_push_view(**git_kw):
     return svc, view, painted
 
 
-def test_push_view_no_porcelain_scan():
-    """动作行视图：激活不触发 porcelain 扫描（无文件清单，零 I/O）。"""
+def test_push_view_prescans_on_activate():
+    """激活即预执行扫描：真实跑完暂存+收集，阶段行免 Enter 即见；失效重扫。"""
     svc, view, _ = _make_push_view(initialized=True, remote="x",
                                    files={"a.py": "1"})
     base = svc.git.porcelain_calls  # 线束构造时 get_status 已计一次
     view.activate()
-    view.activate()
-    assert svc.git.porcelain_calls == base  # 懒加载不扫描清单
-    assert "1 change(s)" in view.render()  # 空态显示变更数
+    assert svc.git.stage_all_calls == 1        # 预扫描确实执行了暂存
+    assert svc.git.porcelain_calls > base      # 收集变更项读了 porcelain
+    lines = view.render().splitlines()
+    assert "Scanning changes" not in "\n".join(lines)  # ACTION 已被 DONE 覆盖
+    assert "✓" in lines[0] and "Scanning complete" in lines[0]
+    assert "1 change(s)" in lines[0]           # 变更数拼在扫描完成行尾
+    # 失效重扫：再跑一遍扫描（结论刷新），会话仍是 ready
     view.invalidate()
     view.activate()
-    assert svc.git.porcelain_calls == base  # 失效重扫同样零扫描
+    assert svc.git.stage_all_calls == 2
+    assert view._session == "ready"
+
+
+def test_push_view_enter_reuses_prescan():
+    """Enter 续跑复用预扫描结果：扫描不执行第二遍，从提交/推送继续。"""
+    svc, view, _ = _make_push_view(initialized=True, remote="x",
+                                   files={"a.py": "1", "b.py": "2"})
+    view.activate()
+    assert svc.git.stage_all_calls == 1        # Enter 前已扫一遍
+    view.handle_key(KEY_ENTER)
+    assert svc.git.commits                     # 确实提交
+    assert svc.git.stage_all_calls == 1        # 扫描未执行第二遍
+    out = view.render()
+    assert out.count("Scanning complete") == 1  # 扫描行仅一条（无重复回显）
+    assert "✓ Push completed (2 change(s))" in out.splitlines()[-1]
 
 
 def test_push_view_enter_renders_result():
@@ -165,9 +184,8 @@ def test_push_view_progress_appended_to_action_line():
     from core.events import ActionLog
     svc, view, _ = _make_push_view(initialized=True, remote="x",
                                    files={"a.py": "1"})
-    view.activate()
     with view._lock:
-        view._session = "running"
+        view._session = "running"  # 直接置会话态，隔离预扫描行的干扰
     svc.bus.publish(ActionLog("ACTION", "Pushing to GitHub", stage="push"))
     assert "> Pushing to GitHub" in view.render().splitlines()[0]
     svc.bus.publish(ActionLog("PROGRESS", "42% (5/12)", stage="push"))
@@ -230,32 +248,31 @@ def test_push_view_stage_lines_layout(tmp_path):
 
 
 def test_push_view_empty_shows_hint():
-    """空会话（无变更）：免 Enter 预显示扫描结论两行（✓ 扫描完成 / 无需提交）。"""
+    """预扫描完成（无变更）：免 Enter 即见扫描结论两行（✓ 完成 / 无需提交）。"""
     svc, view, _ = _make_push_view(initialized=True, remote="x")
     view.activate()
     out = view.render()
-    assert "✓ Scanning complete" in out          # 扫描结论行 1
-    assert "No changes to commit" in out         # 扫描结论行 2
+    lines = out.splitlines()
+    assert "✓" in lines[0] and "Scanning complete" in lines[0]   # 结论行 1
+    assert "No changes to commit" in lines[-1]                   # 结论行 2
     assert "Press Enter to push" not in out      # 无提示文字
 
 
 def test_push_view_idle_shows_change_count():
-    """开屏按 Enter 前显示扫描结论两行：第二行区分有无变化，格式一致。"""
-    # 有变更：第二行显示 N change(s)
+    """开屏按 Enter 前即见真实扫描结论：变更数拼在扫描完成行尾。"""
+    # 有变更：✓ 扫描完成 N change(s)
     svc, view, _ = _make_push_view(initialized=True, remote="x",
                                    files={"a.py": "1", "b.py": "2"})
     view.activate()
-    out = view.render()
-    lines = out.splitlines()
-    assert "✓ Scanning complete" in lines[0]
-    assert "2 change(s)" in lines[1]
-    # 无变更：同样两行格式，第二行换成无需提交
+    lines = view.render().splitlines()
+    assert "✓" in lines[0] and "Scanning complete" in lines[0]
+    assert "2 change(s)" in lines[0]
+    # 无变更：第二行换成无需提交（NOTE 灰色行）
     svc, view, _ = _make_push_view(initialized=True, remote="x")
     view.activate()
-    out = view.render()
-    lines = out.splitlines()
-    assert "✓ Scanning complete" in lines[0]
-    assert "No changes to commit" in lines[1]
+    lines = view.render().splitlines()
+    assert "Scanning complete" in lines[0]
+    assert "No changes to commit" in lines[-1]
 
 
 def test_push_view_no_repo_idle_empty():
@@ -268,17 +285,17 @@ def test_push_view_no_repo_idle_empty():
 
 
 def test_push_view_idle_to_session_grows_lines():
-    """开屏扫描结论两行；Enter 后阶段行逐行累积（行数增长）。"""
+    """开屏预扫描结论行；Enter 续跑后阶段行逐行累积（行数增长）。"""
     svc, view, _ = _make_push_view(initialized=True, remote="x",
                                    files={"a.py": "1", "b.py": "2"})
     view._max_rows = lambda: 6
     view.activate()
-    idle_lines = view._render_lines()          # 空态：扫描结论两行
+    idle_lines = view._render_lines()          # 空态：预扫描结论（单行）
     assert "✓" in idle_lines[0] and "Scanning complete" in idle_lines[0]
-    assert "2 change(s)" in idle_lines[1]
+    assert "2 change(s)" in idle_lines[0]
     view.handle_key(KEY_ENTER)
     session_lines = view._render_lines()
-    assert len(session_lines) > len(idle_lines)     # 阶段行累积增长
+    assert len(session_lines) > len(idle_lines)     # 提交/推送阶段行追加
     assert "Push completed" in session_lines[-1]    # 末行=结果
 
 
@@ -537,11 +554,11 @@ def test_empty_state_none_colored_gray(monkeypatch, tmp_path):
     import tui.renderer
     monkeypatch.setattr(tui.renderer, "supports_color", lambda stream: True)
     gray = "\x1b[38;2;99;99;99m"  # #636363 占位色
-    gray2 = "\x1b[38;2;139;148;158m"  # #8B949E 次要色（变更数 COLOR_GRAY）
-    # 推送（空会话：变更数灰色显示）
-    _, push, _ = _make_push_view(initialized=True, remote="x", files={"a.py": "1"})
+    gray2 = "\x1b[38;2;139;148;158m"  # #8B949E 次要色（无需提交 NOTE 色）
+    # 推送（预扫描无变更：NOTE 灰色行显示）
+    _, push, _ = _make_push_view(initialized=True, remote="x")
     push.activate()
-    assert gray2 in push.render() and "1 change(s)" in push.render()
+    assert gray2 in push.render() and "No changes to commit" in push.render()
     # 拉取（无提交历史）
     _, pull = _make_pull_view(initialized=True, remote="x", commits=[])
     pull.activate()

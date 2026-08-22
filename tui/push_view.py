@@ -1,13 +1,14 @@
 """推送标签页：推送会话阶段行累积回显（每阶段一行，完成留痕）。
 
 开屏即一屏框架，Enter 推送前后不跳界面：
-- 无会话：预显示扫描结论两行（`✓ 扫描完成` + 第二行 `N 处变化` /
-  `> 没有需要提交的更改`），有无变化格式一致仅内容不同，免 Enter 即见；
-  未初始化/错误状态为空；
-- 推送中：每个阶段一行（初始化/配置/扫描/提交/推送/发布），按出现
-  顺序累积——进行中行 `> 当前动作`，完成行 `✓ 结果` 保留不覆盖，
-  失败行 `✕ 原因`；push 阶段实时进度（百分比 + 对象数）拼在当前
-  动作行尾并覆盖旧进度，如 `> 推送到 GitHub 42% (12/29) · 1.20 MiB`；
+- 激活即后台预执行扫描（SyncService.scan()）：完成前 loading 留白，
+  完成后免 Enter 即见真实扫描结论行（`✓ 扫描完成`(+ N 项更改) /
+  `> 没有需要提交的更改`）；未初始化/错误状态不预扫描（留空）；
+- Enter 推送：ready 会话复用预扫描结果续跑（`sync.run(reuse_scan=True)`，
+  扫描不执行第二遍），其余状态清空阶段行全流程执行；提交/推送/发布
+  每个阶段一行按出现顺序累积——进行中行 `> 当前动作`，完成行 `✓ 结果`
+  保留不覆盖，失败行 `✕ 原因`；push 阶段实时进度（百分比 + 对象数）
+  拼在当前动作行尾并覆盖旧进度，如 `> 推送到 GitHub 42% (12/29) · 1.20 MiB`；
 - 结束后：所有阶段行保留可回溯；整体失败在末尾追加 `✕ 失败原因`。
 
 事件驱动：core 服务发布 ActionLog（带 stage 标识），表现层按 stage
@@ -15,7 +16,10 @@
 （进行中动作行后拼最新进度、完成行后拼附注，重复消息自动去重）。
 CLI 等纯文本消费者忽略 stage 字段，零影响。
 
-每次 Enter 开启新会话（清空上一会话阶段行）；切出保留当前会话可切回查看。
+线程纪律：预扫描在 executor worker 线程执行，期间发布的 ActionLog
+先入缓冲区（worker 禁止 ANSI 渲染），完成后统一应用为 ready 会话，
+经 on_loaded 通知主循环重绘。会话进行中/已结束不重扫（留痕优先）；
+ready 会话随状态签名变化失效重扫（预扫描结论始终最新）。
 """
 from __future__ import annotations
 
@@ -26,7 +30,6 @@ from core.config import (COLOR_ERROR, COLOR_GRAY, COLOR_PUSH_PENDING,
                          COLOR_SUCCESS_SOFT, KEY_ENTER)
 from core.events import (ActionLog, DomainEventBus, SyncCompleted, SyncFailed)
 from core.exceptions import SyncError
-from core.i18n import tr
 from core.protocols import GitProvider
 from core.status import RepoInfo, RepoStatus
 from core.sync_service import SyncService
@@ -45,7 +48,7 @@ _LOG_STYLE = {
 
 
 class PushView(ViewBase):
-    """推送标签页：推送会话阶段行累积回显。"""
+    """推送标签页：预扫描 + 推送会话阶段行累积回显。"""
 
     id = "push"
 
@@ -64,50 +67,86 @@ class PushView(ViewBase):
         self._paint = paint
         self._patch = patch          # 定点更新单行（行号 1-based）；None 时退化为整区重绘
         self._max_rows = max_rows    # 内容区可用行数；超出后阶段行截断保留最新
-        self._session: str | None = None  # None（无会话）/ running / done / failed
+        self._session: str | None = None  # None（无会话）/ ready（已预扫描）/ running / done / failed
         self._stage: dict[str, tuple[str, str]] = {}  # stage → (level, message)
         self._stage_order: list[str] = []             # stage 出现顺序（渲染行序）
         self._stage_title: dict[str, str] = {}        # stage → ACTION 标题（进度拼接基准）
         self._last_lines: list[str] | None = None  # 上次渲染行（markup，增量对比基准）
         self._lock = threading.Lock()
-        # 事件订阅：sync.run() 主线程同步发布，回调可直绘
+        self._buffering = False       # 预扫描进行中：ActionLog 入缓冲区不直绘
+        self._buffer: list[ActionLog] = []
+        # 事件订阅：会话内主线程同步发布可直绘；预扫描 worker 发布走缓冲
         bus.subscribe(ActionLog, self._on_action_log)
         bus.subscribe(SyncFailed, self._on_sync_failed)
         bus.subscribe(SyncCompleted, self._on_sync_completed)
 
     # ── 生命周期 ──
     def _load(self) -> None:
-        """动作回显事件驱动，无需扫描；空实现（激活即就绪，零 I/O）。"""
+        """预执行扫描阶段：Enter 前真实跑完「暂存 → 收集变更项」。
+
+        worker 线程执行：scan() 同步发布的 ActionLog 先入缓冲区（线程
+        纪律：worker 禁止 ANSI 渲染），完成后统一应用为 ready 会话的
+        阶段行，经 on_loaded 通知主循环重绘。未初始化/错误状态跳过；
+        running/done/failed 会话保留留痕不重扫；ready 会话随失效重扫
+        （预扫描结论始终最新）。扫描失败转为 failed 会话留痕。
+        """
+        info = self._get_info()
+        if info is None or info.status in (RepoStatus.NO_REPO,
+                                           RepoStatus.ERROR):
+            return
+        with self._lock:
+            if self._session not in (None, "ready"):
+                return
+            self._buffering = True
+            self._buffer = []
+        try:
+            self.sync.scan()
+        except SyncError as e:
+            with self._lock:
+                buf = self._take_buffer_locked()
+                self._reset_stage_locked()
+                for ev in buf:
+                    self._set_stage(ev.stage, ev.level, ev.message)
+                self._session = "failed"
+                self._set_stage("__fail", "FAIL", e.message)
+            return
+        with self._lock:
+            buf = self._take_buffer_locked()
+            self._reset_stage_locked()
+            for ev in buf:
+                self._set_stage(ev.stage, ev.level, ev.message)
+            self._session = "ready"
+
+    def _take_buffer_locked(self) -> list[ActionLog]:
+        """取出事件缓冲并结束缓冲态（已持锁调用）。"""
+        self._buffering = False
+        buf, self._buffer = self._buffer, []
+        return buf
+
+    def _reset_stage_locked(self) -> None:
+        """清空阶段行（已持锁调用；重扫时丢弃上一轮结论防残留）。"""
+        self._stage.clear()
+        self._stage_order.clear()
+        self._stage_title.clear()
 
     # ── 渲染（纯函数，只读缓存）──
     def _render(self) -> str:
         return markup_to_ansi("\n".join(self._render_lines()))
 
     def _render_lines(self) -> list[str]:
-        """当前视图的 markup 行列表：无会话为扫描结论两行，会话为阶段行累积。
+        """当前视图的 markup 行列表：会话阶段行按出现顺序累积。
 
-        无会话：统一两行格式（`✓ 扫描完成` + 第二行 `N 处变化` /
-        `> 没有需要提交的更改`），免 Enter 即见；未初始化/错误状态为空。
-        推送中/结束：每个阶段一行按出现顺序累积，完成留痕、失败红色，
-        超出内容区可用行数时截断保留末尾（最新阶段）。
+        无会话（未初始化/错误状态/loading 留白由 ViewBase 处理）：空；
+        ready（预扫描完成）：真实扫描结论行，免 Enter 即见；推送中/结束：
+        每个阶段一行累积，完成留痕、失败红色，超出内容区可用行数时
+        截断保留末尾（最新阶段）。
         """
         with self._lock:
             session = self._session
             order = list(self._stage_order)
             stage = dict(self._stage)
         if session is None:
-            # 无会话：预显示扫描结论（有无变化仅第二行内容不同，格式一致）
-            info = self._get_info()
-            if info is None or info.status in (RepoStatus.NO_REPO,
-                                               RepoStatus.ERROR):
-                return []
-            detail = (tr(f"{info.change_count} 处变化",
-                         f"{info.change_count} change(s)")
-                      if info.change_count
-                      else tr("没有需要提交的更改", "No changes to commit"))
-            return [self._log_markup("DONE",
-                                     tr("扫描完成", "Scanning complete")),
-                    self._log_markup("NOTE", detail)]
+            return []
         lines = [self._log_markup(level, message)
                  for key in order for level, message in [stage[key]]]
         limit = self._max_rows() if self._max_rows is not None else None
@@ -159,19 +198,22 @@ class PushView(ViewBase):
 
     # ── 推送会话 ──
     def _start_push(self) -> None:
-        """开启推送会话：fetch 刷新远程状态 → 清空阶段行 → 执行同步。
+        """开启推送会话：fetch 刷新远程状态 → ready 续跑，否则清空全流程。
 
-        会话视图先行渲染（空阶段行），随后事件驱动逐阶段追加刷新。
+        ready 会话（Enter 前已预扫描）保留阶段行并复用扫描结果
+        （sync.run(reuse_scan=True)），扫描不执行第二遍；其余状态清空
+        阶段行从初始化开始全流程执行。会话视图先行渲染，随后事件驱动
+        逐阶段追加刷新。
         """
         self._refresh_status(True)  # fetch 刷新远程状态（分叉/落后检测可靠）
         with self._lock:
+            resume = self._session == "ready"
             self._session = "running"
-            self._stage.clear()
-            self._stage_order.clear()
-            self._stage_title.clear()
-        self._refresh()  # 行数变化（变更数 → 空会话）：整区重绘
+            if not resume:
+                self._reset_stage_locked()
+        self._refresh()  # 行数变化：整区重绘
         try:
-            self.sync.run()  # 动作事件经订阅覆盖刷新视图
+            self.sync.run(reuse_scan=resume)  # 动作事件经订阅覆盖刷新视图
         except SyncError:
             pass  # SyncFailed 事件已标记失败（_on_sync_failed）
 
@@ -194,12 +236,19 @@ class PushView(ViewBase):
             return  # 无变化行则零输出
         self._paint(markup_to_ansi("\n".join(lines)))
 
-    # ── 事件驱动（主线程同步回调）──
+    # ── 事件驱动 ──
     def _on_action_log(self, event: ActionLog) -> None:
-        """按 stage 更新对应阶段行：新阶段追加、已有阶段更新、PROGRESS 拼进度。"""
-        if self._session is None:
-            return
+        """按 stage 更新阶段行：新阶段追加、已有阶段更新、PROGRESS 拼进度。
+
+        预扫描期间（worker 线程发布）事件入缓冲区不直绘，完成后由
+        _load 统一应用；会话内（主线程同步发布）直接更新并刷新。
+        """
         with self._lock:
+            if self._buffering:
+                self._buffer.append(event)
+                return
+            if self._session is None:
+                return
             self._set_stage(event.stage, event.level, event.message)
         self._refresh()
 

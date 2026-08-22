@@ -40,6 +40,7 @@ class FakeGitProvider:
         self.clean_calls = 0
         self.remote_head_hash: str | None = None
         self.porcelain_calls = 0        # get_porcelain 调用计数（懒加载断言）
+        self.stage_all_calls = 0        # stage_all 调用计数（预扫描复用断言）
         self.ahead_diff = ""            # diff_name_status 输出（AHEAD 推送页文件显示注入）
         self.recent_commits_calls = 0   # get_recent_commits 调用计数
         self.branches: list[str] = ["main"]
@@ -100,6 +101,7 @@ class FakeGitProvider:
         return False
 
     def stage_all(self) -> tuple[bool, str]:
+        self.stage_all_calls += 1
         # 与真实 git add . 一致：gitignore 忽略的未跟踪文件不入暂存；
         # 已跟踪文件不受 gitignore 影响
         ignored = {f for f in set(self.files) - self.tracked

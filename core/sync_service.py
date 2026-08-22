@@ -27,36 +27,32 @@ class SyncService:
         self.bus = bus
         self.repo_path = repo_path
         self.release = release
+        self.scanned_items: dict[str, str] | None = None  # scan() 结果，run(reuse_scan=True) 消费
 
-    def run(self) -> SyncCompleted:
-        """执行完整同步流程。分叉时自动强推（本地 1:1 覆盖远程）。"""
+    def run(self, *, reuse_scan: bool = False) -> SyncCompleted:
+        """执行完整同步流程。分叉时自动强推（本地 1:1 覆盖远程）。
+
+        reuse_scan=True：复用预扫描（scan()）结果直接从提交阶段继续，
+        扫描不执行第二遍（交互模式 Enter 前已后台跑完扫描）。
+        """
         try:
-            return self._run()
+            return self._run(reuse_scan)
         except SyncError as e:
             self.bus.publish(SyncFailed(e.message))
             raise
 
     # ── 主流程 ──
-    def _run(self) -> SyncCompleted:
+    def scan(self) -> dict[str, str]:
+        """扫描阶段：gitignore 隔离 → 暂存全部 → 收集变更项。
+
+        可独立于 run() 预执行（交互模式激活即后台跑，免 Enter 重复执行）；
+        发布 scan/commit 阶段事件，结果存入 scanned_items 供 run 复用。
+        """
         git = self.git
         git.create_ignore()
         # changelog.md 不入库：gitignore 隔离新文件（Release 仍读本地文件发布，
-        # 见下方 maybe_publish）；历史已入库的残留由 stage 后 rm_cached 清理
+        # 见 run 的 maybe_publish）；历史已入库的残留由 stage 后 rm_cached 清理
         git.ensure_gitignore_entry("changelog.md")
-
-        st = git.get_status()
-        if not st["initialized"]:
-            self.bus.publish(ActionLog("ACTION", tr("初始化 Git 仓库",
-                                                    "Initializing git repository"),
-                                       stage="init"))
-            git.init_repo()
-            # 仅建仓时改名一次 main；此后同步不动分支名（推当前分支）
-            git.branch_to_main()
-            self.bus.publish(ActionLog("DONE", tr("仓库已初始化",
-                                                  "Repository initialized"),
-                                       stage="init"))
-        if not git.remote_url():
-            self._configure_remote()
 
         self.bus.publish(ActionLog("ACTION", tr("扫描更改", "Scanning changes"),
                                    stage="scan"))
@@ -71,13 +67,41 @@ class SyncService:
         if git.is_tracked("changelog.md"):
             git.rm_cached("changelog.md")
 
-        updated_items = self._collect_updated_items()
-        if updated_items:
+        items = self._collect_updated_items()
+        if items:
             self.bus.publish(ActionLog(
                 "PROGRESS",
-                tr(f"{len(updated_items)} 项更改",
-                   f"{len(updated_items)} change(s)"),
+                tr(f"{len(items)} 项更改",
+                   f"{len(items)} change(s)"),
                 stage="scan"))
+        else:
+            self.bus.publish(ActionLog("NOTE", tr("没有需要提交的更改",
+                                                  "No changes to commit"),
+                                       stage="commit"))
+        self.scanned_items = items
+        return items
+
+    def _run(self, reuse_scan: bool = False) -> SyncCompleted:
+        git = self.git
+        st = git.get_status()
+        if not st["initialized"]:
+            self.bus.publish(ActionLog("ACTION", tr("初始化 Git 仓库",
+                                                    "Initializing git repository"),
+                                       stage="init"))
+            git.init_repo()
+            # 仅建仓时改名一次 main；此后同步不动分支名（推当前分支）
+            git.branch_to_main()
+            self.bus.publish(ActionLog("DONE", tr("仓库已初始化",
+                                                  "Repository initialized"),
+                                       stage="init"))
+        if not git.remote_url():
+            self._configure_remote()
+
+        if reuse_scan and self.scanned_items is not None:
+            updated_items = self.scanned_items  # 复用预扫描结果：不再扫一遍
+            self.scanned_items = None
+        else:
+            updated_items = self.scan()
         committed = 0
         if updated_items:
             committed = self._commit(updated_items)
@@ -87,10 +111,7 @@ class SyncService:
                     tr(f"已提交 {len(updated_items)} 项更改",
                        f"Committed {len(updated_items)} change(s)"),
                     stage="commit"))
-        else:
-            self.bus.publish(ActionLog("NOTE", tr("没有需要提交的更改",
-                                                  "No changes to commit"),
-                                       stage="commit"))
+        # 无变更时 scan() 已发布「没有需要提交的更改」（stage=commit），此处不重发
 
         self.bus.publish(ActionLog("ACTION", tr("推送到 GitHub",
                                                 "Pushing to GitHub"),
