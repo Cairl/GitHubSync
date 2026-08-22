@@ -72,9 +72,21 @@ class SyncService:
             git.rm_cached("changelog.md")
 
         updated_items = self._collect_updated_items()
+        if updated_items:
+            self.bus.publish(ActionLog(
+                "PROGRESS",
+                tr(f"{len(updated_items)} 项更改",
+                   f"{len(updated_items)} change(s)"),
+                stage="scan"))
         committed = 0
         if updated_items:
             committed = self._commit(updated_items)
+            if committed:
+                self.bus.publish(ActionLog(
+                    "PROGRESS",
+                    tr(f"已提交 {len(updated_items)} 项更改",
+                       f"Committed {len(updated_items)} change(s)"),
+                    stage="commit"))
         else:
             self.bus.publish(ActionLog("NOTE", tr("没有需要提交的更改",
                                                   "No changes to commit"),
@@ -154,7 +166,11 @@ class SyncService:
     def _push_with_recovery(self) -> None:
         """推送与失败恢复：建仓引导 / 分叉自动强推；其余错误分类抛出。"""
         branch = self.git.current_branch()
-        ok, out = self.git.push(branch, upstream=True)
+
+        def on_progress(text: str) -> None:
+            self.bus.publish(ActionLog("PROGRESS", text, stage="push"))
+
+        ok, out = self.git.push(branch, upstream=True, on_progress=on_progress)
         if ok:
             return
         err = classify_push_error(out)
@@ -168,7 +184,8 @@ class SyncService:
             self.bus.publish(ActionLog("ACTION", tr("重新推送",
                                                     "Retrying push"),
                                        stage="push"))
-            ok, out = self.git.push(branch, upstream=True)
+            ok, out = self.git.push(branch, upstream=True,
+                                    on_progress=on_progress)
             if ok:
                 return
             raise classify_push_error(out)
@@ -178,7 +195,8 @@ class SyncService:
                 "检测到分叉，强制推送（丢弃远程独有提交）",
                 "Diverged; force pushing (discarding remote-only commits)"),
                 stage="push"))
-            ok, out = self.git.push(branch, upstream=True, force=True)
+            ok, out = self.git.push(branch, upstream=True, force=True,
+                                    on_progress=on_progress)
             if ok:
                 return
             raise classify_push_error(out)

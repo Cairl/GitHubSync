@@ -1,7 +1,7 @@
 """文件日志：把 TUI 无回显化的业务日志与 git/gh 命令执行详情落盘，供后期 AI 调试。
 
-- 业务日志：订阅 DomainEventBus（ActionLog 的 ACTION/DONE/FAIL/NOTE 与各类完成/失败事件），
-  TUI 交互模式取消 ActionLog 回显，但这些事件在此全部落盘；
+- 业务日志：订阅 DomainEventBus（ActionLog 的 ACTION/DONE/FAIL/NOTE/PROGRESS
+  与各类完成/失败事件），TUI 交互模式取消 ActionLog 回显，但这些事件在此全部落盘；
 - 命令日志：注册 core.command 的命令钩子，每次 run_command 执行后记录
   （命令 + 成功/失败 + 输出截断），可还原完整执行序列；
 - 落盘位置：GitHubSync 项目根 logs/ 目录，每次运行（create_services）生成一个

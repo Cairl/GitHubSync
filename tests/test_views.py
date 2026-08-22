@@ -167,6 +167,48 @@ def test_push_view_failure_renders_error():
     assert any("Scanning changes" in ln and "✓" in ln for ln in lines)
 
 
+def test_push_view_progress_updates_detail_keeps_state():
+    """PROGRESS 事件：只更新阶段 detail，不翻转进行中/完成状态。"""
+    from core.events import ActionLog
+    from tui.push_view import _Stage
+    svc, view, _ = _make_push_view(initialized=True, remote="x",
+                                   files={"a.py": "1"})
+    view.activate()
+    # 模拟进行中的 push 会话：手动置阶段状态后发 ACTION + PROGRESS 事件
+    with view._lock:
+        view._session = "running"
+        view._stages = [_Stage("scan"), _Stage("push")]
+        view._header = "[#636363]Pushing…[/]"
+    svc.bus.publish(ActionLog("ACTION", "Pushing to GitHub", stage="push"))
+    out = view.render()
+    assert "…" in out  # push 阶段进行中（ACTION 事件驱动）
+
+    svc.bus.publish(ActionLog("PROGRESS", "100% (12/12) · 1.20 MiB",
+                              stage="push"))
+    out = view.render()
+    assert "100% (12/12) · 1.20 MiB" in out          # 详情已更新
+    assert "…" in out                                # 状态保持 running
+    push_stage = next(s for s in view._stages if s.token == "push")
+    assert push_stage.state == "running"             # 不翻转状态
+    assert push_stage.detail == "100% (12/12) · 1.20 MiB"
+
+
+def test_push_view_progress_via_full_sync(tmp_path):
+    """真实推送流程：scan/commit 的 PROGRESS 详情随事件出现在阶段行。"""
+    svc, view, _ = _make_push_view(initialized=True, remote="x",
+                                   files={"a.py": "1", "b.py": "2"})
+    svc.sync.repo_path = str(tmp_path)
+    svc.release.repo_path = str(tmp_path)
+    svc.git.push_progress = ["100% (2/2) · 512 B"]   # fake 模拟 push 进度
+    view.activate()
+    view.handle_key(KEY_ENTER)
+    out = view.render()
+    lines = out.splitlines()
+    assert any("Scanning changes" in ln and "2 change(s)" in ln for ln in lines)
+    assert any("Commit" in ln and "2 change(s)" in ln for ln in lines)
+    assert any("Push" in ln and "100% (2/2) · 512 B" in ln for ln in lines)
+
+
 def test_push_view_release_stage_published(tmp_path):
     """工作区干净 + 本地 changelog 待发布：会话含 Release 阶段且 ✓。"""
     svc, view, _ = _make_push_view(initialized=True, remote="x")

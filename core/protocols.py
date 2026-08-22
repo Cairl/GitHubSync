@@ -5,7 +5,7 @@ tests.fakes 的 Fake 实现均为结构式满足（typing.Protocol）。
 """
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Callable, Protocol
 
 
 class GitProvider(Protocol):
@@ -94,8 +94,14 @@ class GitProvider(Protocol):
         ...
 
     def push(self, branch: str, upstream: bool = False,
-             force: bool = False) -> tuple[bool, str]:
-        """git push → (成功, 输出)。"""
+             force: bool = False,
+             on_progress: Callable[[str], None] | None = None
+             ) -> tuple[bool, str]:
+        """git push → (成功, 输出)。
+
+        on_progress：提供时以流式执行（--progress）逐行回调进度文本
+        （如 "100% (12/12) · 1.20 MiB"）；None 时普通执行（无进度回调）。
+        """
         ...
 
     # ── 查询与恢复 ──

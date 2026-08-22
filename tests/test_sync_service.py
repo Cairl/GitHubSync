@@ -242,6 +242,31 @@ def test_sync_emits_action_logs(tmp_path):
     assert "ACTION" in levels and "DONE" in levels
 
 
+def test_sync_emits_progress_logs(tmp_path):
+    """实时进度：scan 文件数 / commit 提交数 / push 进度均以 PROGRESS 发布。"""
+    sync, git, gh, bus, _ = make_services(str(tmp_path))
+    git.init_repo()
+    git.remote = "https://github.com/octocat/repo"
+    git.files["a.txt"] = "x"
+    git.files["b.txt"] = "y"
+    git.push_progress = ["45% (1/2) · 512 B", "100% (2/2) · 1.00 KiB"]
+
+    logs = []
+    bus.subscribe(ActionLog, logs.append)
+
+    sync.run()
+
+    progress = [e for e in logs if e.level == "PROGRESS"]
+    stages = [e.stage for e in progress]
+    assert "scan" in stages and "commit" in stages and "push" in stages
+    scan = next(e for e in progress if e.stage == "scan")
+    assert scan.message == "2 change(s)"
+    commit = next(e for e in progress if e.stage == "commit")
+    assert commit.message == "Committed 2 change(s)"
+    push = [e.message for e in progress if e.stage == "push"]
+    assert push == ["45% (1/2) · 512 B", "100% (2/2) · 1.00 KiB"]
+
+
 def test_sync_on_feature_branch_keeps_branch_and_push_target(tmp_path):
     """契约：非 main 分支同步后分支名不变，推送目标为当前分支。"""
     sync, git, gh, bus, _ = make_services(str(tmp_path))

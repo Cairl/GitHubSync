@@ -49,6 +49,7 @@ class FakeGitProvider:
         self.merge_ok = True
         self.merge_abort_calls = 0
         self.list_branches_calls = 0    # list_branches 调用计数（懒加载断言）
+        self.push_progress: list[str] = []  # push 时按序回调 on_progress 的进度文本
 
     # ── GitProvider 协议 ──
     def get_status(self) -> dict:
@@ -170,8 +171,12 @@ class FakeGitProvider:
         self.commits.append(f"commit-{len(self.commits) + 1}")
         return True, ""
 
-    def push(self, branch: str, upstream: bool = False, force: bool = False) -> tuple[bool, str]:
+    def push(self, branch: str, upstream: bool = False, force: bool = False,
+             on_progress=None) -> tuple[bool, str]:
         self.push_branches.append(branch)
+        if on_progress is not None:
+            for text in self.push_progress:
+                on_progress(text)
         if force:
             self.force_push_calls += 1
             if self.force_fail:

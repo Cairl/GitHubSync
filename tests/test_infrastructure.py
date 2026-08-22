@@ -11,7 +11,7 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from core.exceptions import CommandTimeoutError
-from core.command import retry, run_command
+from core.command import retry, run_command, run_command_stream
 from core.gitignore_parser import GitignoreMatcher
 
 
@@ -104,6 +104,67 @@ def test_run_command_failure():
     )
     assert ok is False
     assert "boom" in out
+
+
+# ── 流式命令执行（进度回显）──
+def test_run_command_stream_chunks_in_order():
+    """流式执行：输出按行实时回调（含 \\r 回车行），返回合并输出。"""
+    script = (
+        "import sys, time;"
+        "sys.stdout.write('first\\n');sys.stdout.flush();"
+        "time.sleep(0.05);"
+        "sys.stdout.write('second\\r');sys.stdout.flush();"
+        "time.sleep(0.05);"
+        "sys.stderr.write('err\\n');sys.stdout.flush();"
+    )
+    chunks: list[str] = []
+    ok, out = run_command_stream([sys.executable, "-c", script],
+                                 on_chunk=chunks.append)
+    assert ok is True
+    assert "first" in out and "second" in out and "err" in out
+    assert any(c == "first\n" for c in chunks)
+    assert any("second" in c for c in chunks)     # \\r 行也实时回调
+    assert any("err" in c for c in chunks)
+
+
+def test_run_command_stream_failure():
+    ok, out = run_command_stream(
+        [sys.executable, "-c", "import sys; sys.stderr.write('boom'); sys.exit(3)"])
+    assert ok is False
+    assert "boom" in out
+
+
+def test_run_command_stream_timeout():
+    with pytest.raises(CommandTimeoutError):
+        run_command_stream(
+            [sys.executable, "-c", "import time; time.sleep(5)"], timeout=0.3)
+
+
+# ── push 进度解析 ──
+def test_parse_progress_writing_objects():
+    from core.push_progress import parse_progress
+    line = "Writing objects: 100% (12/12), 1.20 MiB | 1.10 MiB/s, done."
+    assert parse_progress(line) == "100% (12/12) · 1.20 MiB"
+
+
+def test_parse_progress_partial_percent():
+    from core.push_progress import parse_progress
+    line = "Writing objects:  45% (6/12), 480.00 KiB | 1.20 MiB/s"
+    assert parse_progress(line) == "45% (6/12) · 480.00 KiB"
+
+
+def test_parse_progress_enumerating():
+    from core.push_progress import parse_progress
+    assert parse_progress("Enumerating objects: 12, done.") == "12 objects"
+
+
+def test_parse_progress_ignores_noise():
+    """无进度信息的行（远程提示/delta 统计/URL 等）返回 None。"""
+    from core.push_progress import parse_progress
+    assert parse_progress("Total 12 (delta 0), reused 0 (delta 0)") is None
+    assert parse_progress("remote: Resolving deltas: 100% (3/3), done.") is None
+    assert parse_progress("To https://github.com/o/r.git") is None
+    assert parse_progress("") is None
 
 
 # ── 重试装饰器 ──

@@ -34,11 +34,12 @@ github_sync.bat          # Windows 启动器（纯批处理，零 PowerShell）�
 │   ├── status_service.py# StatusService：CLI 与交互模式的唯一状态来源（只读 git 调用 ThreadPoolExecutor 一波并行）
 │   ├── sync_service.py  # 全量同步（扫描→提交→推送→失败恢复→Release）
 │   ├── restore_service.py / release_service.py / file_ops_service.py
-│   ├── command.py       # run_command（超时）+ retry 装饰器（仅只读操作）+ 命令日志钩子
+│   ├── command.py       # run_command / run_command_stream（超时）+ retry 装饰器（仅只读操作）+ 命令日志钩子
 │   ├── executor.py      # Inline/Thread 双实现（submit(fn, callback)；callback 在 worker 线程触发，仅允许线程安全操作如 queue.put，禁止 ANSI 渲染与事件发布）
 │   ├── git_provider.py  # GitCLIProvider：git CLI 实现（ahead_behind_upstream 走 HEAD...@{u}，get_status 无 remote 子进程）
 │   ├── github_provider.py # GhCLIProvider：gh CLI 实现
 │   ├── gitignore_parser.py # GitignoreMatcher：完整 gitignore 规范解析
+│   ├── push_progress.py# push 进度解析（parse_progress 纯函数：git push --progress 行 → 紧凑进度文本）
 │   └── utils.py         # get_key / poll_key（kbhit 轮询，默认 50ms）/ hide_cursor / get_display_width（VT100 启用在 ansi.py）
 │
 ├── cli/                 # CLI 表现层：argparse + 输出格式化（零业务逻辑）
@@ -51,7 +52,7 @@ github_sync.bat          # Windows 启动器（纯批处理，零 PowerShell）�
 │   ├── screen.py        # render_header / render_menu / render_status_line 纯函数
 │   ├── interactive.py   # InteractiveApp：骨架首帧（info=None 零 I/O）+ 非阻塞主循环（poll_key 轮询 + queue 脏标志 drain）+ 状态/版本后台加载 + 顶栏常驻 + 标签页单循环派发
 │   ├── view_base.py     # ViewBase：activate/render/handle_key/invalidate + loading 态（executor 后台加载）
-│   ├── push_view.py     # 推送标签页：推送会话阶段进度视图（会话头 + [k/n] 阶段行 + ·/…/✓/✕/- 状态符号）
+│   ├── push_view.py     # 推送标签页：推送会话阶段进度视图（会话头 + [k/n] 阶段行 + ·/…/✓/✕/- 状态符号 + PROGRESS 实时详情）
 │   ├── pull_view.py     # 拉取标签页：本地历史提交，首个 Enter 对齐远程，其余恢复
 │   ├── files_view.py    # 文件标签页：↑↓ 移动，Enter 切换推送/忽略
 │   ├── branch_view.py   # 分支标签页：首行合并到 main，下方分支列表 Enter 切换
@@ -75,7 +76,7 @@ github_sync.bat          # Windows 启动器（纯批处理，零 PowerShell）�
 - **接口定义在 core/protocols.py，实现在 core/git_provider.py / github_provider.py**（依赖倒置，可替换实现）；
 - UI 永不触碰 git/gh 命令（tui/ 与 cli/ 中无 subprocess 调用，全部走 core 服务）；
 - 渲染路径零子进程：`tui/screen.py` 纯函数只读 RepoInfo；
-- 事件驱动：core 服务发布事件（DomainEventBus），表现层订阅刷新；交互模式中 PushView 订阅带 stage 标识的 ActionLog 做结构化阶段回显（CLI 纯文本消费者忽略 stage），CLI 仍按 stdout/stderr 契约输出；`core/file_logger.py` 在组合根订阅全部事件 + `core/command.py` 命令钩子，把 TUI 无回显的日志与命令详情统一落盘项目根 `logs/githubsync-<时间戳毫秒>.log`（每次运行一个新会话文件，CLI/TUI、任何被同步项目都汇聚到此目录；`logs/` 由 GitHubSync 自身 .gitignore 排除；1MB 轮转，写失败静默）。
+- 事件驱动：core 服务发布事件（DomainEventBus），表现层订阅刷新；交互模式中 PushView 订阅带 stage 标识的 ActionLog 做结构化阶段回显（PROGRESS 级别实时更新阶段详情，如扫描文件数/提交数/push 对象写入百分比；CLI 纯文本消费者忽略 stage），CLI 仍按 stdout/stderr 契约输出；`core/file_logger.py` 在组合根订阅全部事件 + `core/command.py` 命令钩子，把 TUI 无回显的日志与命令详情统一落盘项目根 `logs/githubsync-<时间戳毫秒>.log`（每次运行一个新会话文件，CLI/TUI、任何被同步项目都汇聚到此目录；`logs/` 由 GitHubSync 自身 .gitignore 排除；1MB 轮转，写失败静默）。
 
 ### 扩展性约定
 
@@ -176,7 +177,7 @@ python -m main
 - **禁止在渲染路径中执行子进程调用**（`build_screen`/`render_*` 只读缓存）
 
 ### 无回显化（同步操作结果由视图状态表达）
-- 推送：`PushView`（`tui/push_view.py`）推送会话阶段进度视图——按 Enter 后按状态预构建阶段清单（init/config/scan/commit/push/release），订阅带 stage 标识的 ActionLog 驱动阶段状态机：`·` 未开始 / `…` 进行中 / `✓` 完成（绿）/ `✕` 失败（红）/ `-` 未执行（灰）；会话头表达整体结果（`推送完成（N 项更改）` / `推送失败: 原因`）；git 仍为一次 commit + push
+- 推送：`PushView`（`tui/push_view.py`）推送会话阶段进度视图——按 Enter 后按状态预构建阶段清单（init/config/scan/commit/push/release），订阅带 stage 标识的 ActionLog 驱动阶段状态机：`·` 未开始 / `…` 进行中 / `✓` 完成（绿）/ `✕` 失败（红）/ `-` 未执行（灰）；会话头表达整体结果（`推送完成（N 项更改）` / `推送失败: 原因`）；阶段行 detail 随事件实时刷新——scan/commit 显示变更数、push 阶段显示对象写入进度（`git push --progress` 经 `run_command_stream` 流式解析，PROGRESS 事件只更新 detail 不翻转状态）；git 仍为一次 commit + push
 - 拉取：`PullView`（`tui/pull_view.py`）通过 `GitProvider.remote_head()` 取远程跟踪引用，本地与远程一致的提交 hash 标浅绿 `COLOR_CYAN`（#ABDFA7，与 [✓] 同色），其余不变色
 - 文件标签页：`FileOpsService.push_file/remove_file` 返回 bool，失败文件行首 `[!]`（红），按钮状态切换即成功指示
 - 失败原因由 i18n 可读消息表达（`推送失败: 网络连接异常…`），原始命令输出落盘 logs/ 供 AI 调试（排查用 CLI `status`）

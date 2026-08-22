@@ -10,6 +10,11 @@ Enter 执行推送时，内容区显示一个"推送会话"：
 标注阶段，表现层按阶段状态机更新，而非解析日志文本。CLI 等纯文本
 消费者忽略该字段，零影响。
 
+实时进度（PROGRESS）：scan/commit/push 阶段进行中发布实时详情——
+扫描到 N 项更改、已提交 N 项更改、push 对象写入百分比（git push
+--progress 流式解析），只更新阶段行 detail 不翻转状态，推送过程不再
+只有「…」符号。
+
 空态（无会话）：差异摘要 + 「按 Enter 推送」提示（见 _summary）。
 每次 Enter 开启新会话（覆盖上一次结果视图）；切出保留当前会话可切回查看。
 """
@@ -246,7 +251,12 @@ class PushView(ViewBase):
 
     # ── 事件驱动（主线程同步回调）──
     def _on_action_log(self, event: ActionLog) -> None:
-        """按阶段标识更新阶段状态：ACTION→进行中，DONE/NOTE→完成，FAIL→失败。"""
+        """按阶段标识更新阶段状态：ACTION→进行中，DONE/NOTE→完成，FAIL→失败。
+
+        PROGRESS（实时进度）只更新 detail 不翻转状态——阶段仍在进行中，
+        详情列展示最新进度（如 push 的对象写入百分比），下次 ACTION/DONE
+        事件到来前的中间态保持 running 不变。
+        """
         if not event.stage or self._session is None:
             return
         with self._lock:
@@ -258,6 +268,8 @@ class PushView(ViewBase):
             elif event.level == "FAIL":
                 st.state = "failed"
                 st.detail = event.message
+            elif event.level == "PROGRESS":
+                st.detail = event.message  # 实时进度：仅更新详情
             else:  # DONE / NOTE：阶段完成
                 st.state = "done"
                 if event.level == "NOTE":

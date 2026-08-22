@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import os
+from typing import Callable
 
-from .command import DEFAULT_TIMEOUT, run_command
+from .command import DEFAULT_TIMEOUT, run_command, run_command_stream
+from .push_progress import parse_progress
 
 # 创建仓库时的默认 .gitignore 内容
 _DEFAULT_GITIGNORE = (
@@ -176,14 +178,30 @@ class GitCLIProvider:
         return False, out
 
     def push(self, branch: str, upstream: bool = False,
-             force: bool = False) -> tuple[bool, str]:
+             force: bool = False,
+             on_progress: Callable[[str], None] | None = None
+             ) -> tuple[bool, str]:
         cmd = ["git", "push"]
         if upstream:
             cmd.append("-u")
         cmd += ["origin", branch]
         if force:
             cmd.append("--force")
+        if on_progress is not None:
+            # --progress：stderr 非 tty 也强制输出进度；流式执行实时回调
+            cmd.append("--progress")
+            return run_command_stream(
+                cmd, cwd=self.cwd, timeout=DEFAULT_TIMEOUT,
+                on_chunk=lambda line: self._emit_progress(line, on_progress))
         return run_command(cmd, cwd=self.cwd, timeout=DEFAULT_TIMEOUT)
+
+    @staticmethod
+    def _emit_progress(line: str,
+                       on_progress: Callable[[str], None]) -> None:
+        """解析 push 进度行并回调；噪音行（无进度）静默跳过。"""
+        text = parse_progress(line)
+        if text is not None:
+            on_progress(text)
 
     # ── 查询与恢复 ──
     def get_change_count(self) -> int:
