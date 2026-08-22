@@ -121,9 +121,9 @@ def test_push_view_enter_renders_stages():
     assert svc.git.fetch_calls == 1                # fetch 恰好一次
     out = view.render()
     lines = out.splitlines()
-    assert "[✓ Scan]" in lines[0]                          # 首行即阶段摘要
-    assert any("[✓ Commit]" in ln for ln in lines)
-    assert any("[✓ Push]" in ln for ln in lines)
+    assert "[✓ Scan" in lines[0]                          # 首行即阶段摘要（含进度 detail）
+    assert any("[✓ Commit" in ln for ln in lines)
+    assert any("[✓ Push" in ln for ln in lines)
     assert any("Push completed (2 change(s))" in ln for ln in lines)  # 结果进日志流
     assert any("Scanning changes" in ln for ln in lines)   # 日志流 ACTION 行
     assert any("Committed 2 change(s)" in ln for ln in lines)
@@ -149,8 +149,8 @@ def test_push_view_no_changes_still_syncs():
     assert svc.git.initialized
     out = view.render()
     lines = out.splitlines()
-    assert "[✓ Init]" in lines[0]                          # 首行即阶段摘要
-    assert any("[✓ Config]" in ln for ln in lines)
+    assert "[✓ Init" in lines[0]                          # 首行即阶段摘要
+    assert any("[✓ Config" in ln for ln in lines)
     assert any("Repository initialized" in ln for ln in lines)  # 日志流
     assert any("Push completed" in ln for ln in lines)     # 结果进日志流
 
@@ -164,13 +164,13 @@ def test_push_view_failure_renders_error():
     view.handle_key(KEY_ENTER)
     out = view.render()
     lines = out.splitlines()
-    assert "[✕ Push]" in lines[0]                          # 首行即阶段摘要（失败阶段）
-    assert any("[✓ Scan]" in ln for ln in lines)
+    assert "[✕ Push" in lines[0]                          # 首行即阶段摘要（失败阶段）
+    assert any("[✓ Scan" in ln for ln in lines)
     assert any("Network error" in ln for ln in lines)      # 失败原因进日志流（✕ FAIL 行）
 
 
 def test_push_view_progress_updates_detail_keeps_state():
-    """PROGRESS 事件：只更新阶段 detail，不翻转进行中/完成状态。"""
+    """PROGRESS 事件：只更新阶段 detail（摘要块内），不翻转进行中状态、不进日志流。"""
     from core.events import ActionLog
     from tui.push_view import _Stage
     svc, view, _ = _make_push_view(initialized=True, remote="x",
@@ -180,39 +180,37 @@ def test_push_view_progress_updates_detail_keeps_state():
     with view._lock:
         view._session = "running"
         view._stages = [_Stage("scan"), _Stage("push")]
-        view._header = "[#636363]Pushing…[/]"
     svc.bus.publish(ActionLog("ACTION", "Pushing to GitHub", stage="push"))
     out = view.render()
-    assert "…" in out  # push 阶段进行中（ACTION 事件驱动）
+    assert "[… Push" in out.splitlines()[0]  # 摘要块 push 阶段进行中
 
     svc.bus.publish(ActionLog("PROGRESS", "100% (12/12) · 1.20 MiB",
                               stage="push"))
     out = view.render()
-    assert "100% (12/12) · 1.20 MiB" in out          # 详情已更新
-    assert "…" in out                                # 状态保持 running
+    assert "100% (12/12) · 1.20 MiB" in out.splitlines()[0]  # 进度进摘要块
+    assert "[… Push" in out.splitlines()[0]                   # 状态保持 running
+    assert "100% (12/12) · 1.20 MiB" not in out.splitlines()[1:]  # 不进日志流
     push_stage = next(s for s in view._stages if s.token == "push")
     assert push_stage.state == "running"             # 不翻转状态
     assert push_stage.detail == "100% (12/12) · 1.20 MiB"
 
 
 def test_push_view_progress_via_full_sync(tmp_path):
-    """真实推送流程：scan/commit/push 的 PROGRESS 详情进日志流，摘要含阶段。"""
+    """真实推送流程：进度进阶段摘要 detail，日志流只含里程碑消息。"""
     svc, view, _ = _make_push_view(initialized=True, remote="x",
                                    files={"a.py": "1", "b.py": "2"})
     svc.sync.repo_path = str(tmp_path)
     svc.release.repo_path = str(tmp_path)
-    svc.git.push_progress = ["100% (2/2) · 512 B"]   # fake 模拟 push 进度
+    svc.git.push_progress = ["16% (1/6)", "100% (2/2) · 512 B"]   # fake 模拟 push 进度
     view.activate()
     view.handle_key(KEY_ENTER)
     out = view.render()
     lines = out.splitlines()
-    assert any("[✓ Scan]" in ln for ln in lines)
-    assert any("Scanning changes" in ln for ln in lines)        # 日志流 ACTION
-    assert any("2 change(s)" in ln for ln in lines)             # scan PROGRESS
-    assert any("[✓ Commit]" in ln for ln in lines)
-    assert any("Committed 2 change(s)" in ln for ln in lines)   # commit 日志
-    assert any("[✓ Push]" in ln for ln in lines)
-    assert any("100% (2/2) · 512 B" in ln for ln in lines)      # push PROGRESS
+    assert "16% (1/6)" not in out            # 中间进度不保留（仅最终 detail）
+    assert "[✓ Push 100% (2/2) · 512 B]" in lines[0]   # 最终进度进摘要块
+    assert any("Scanning changes" in ln for ln in lines)     # 日志流 ACTION
+    assert any("Pushing to GitHub" in ln for ln in lines)    # 日志流 ACTION
+    assert any("Push completed (2 change(s))" in ln for ln in lines)  # 结果
 
 
 def test_push_view_release_stage_published(tmp_path):
@@ -227,7 +225,7 @@ def test_push_view_release_stage_published(tmp_path):
     assert svc.gh.published                     # Release 确实发布
     out = view.render()
     lines = out.splitlines()
-    assert "[✓ Release]" in lines[0]                       # 首行即阶段摘要
+    assert "[✓ Release" in lines[0]                        # 首行即阶段摘要
     assert any("Push completed" in ln for ln in lines)     # 结果进日志流
     assert any("Publishing release" in ln for ln in lines)  # 日志流
 
@@ -243,7 +241,7 @@ def test_push_view_compress_hides_skipped(tmp_path):
     view.activate()
     view.handle_key(KEY_ENTER)
     lines = view.render().splitlines()
-    assert "[✓ Scan]" in lines[0]                          # 首行即阶段摘要
+    assert "[✓ Scan" in lines[0]                          # 首行即阶段摘要
     assert len(lines) == 4                                    # 一屏内：摘要 + 3 日志
     assert any("[- Release]" in ln for ln in lines)           # skipped 阶段以 - 呈现
     assert "Push completed" in lines[-1]                      # 窗口保留最新日志
@@ -296,7 +294,7 @@ def test_push_view_idle_to_session_same_rowcount():
     session_lines = view._render_lines()
     assert len(idle_lines) == len(session_lines) == 6  # 行数恒定
     assert "[· Scan]" in idle_lines[0]          # 首行即阶段摘要
-    assert "[✓ Scan]" in session_lines[0]
+    assert "[✓ Scan" in session_lines[0]
 
 
 # ── PullView ──

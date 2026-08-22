@@ -142,11 +142,18 @@ class PushView(ViewBase):
         return [self._stage_summary_line(stages)] + padded
 
     def _stage_summary_line(self, stages: list[_Stage]) -> str:
-        """阶段摘要行：`  [✓ Scan] [… Push]` 横排，全部阶段一屏可见。"""
+        """阶段摘要行：`  [✓ Scan] [… Push 100% (13/13) · 2.78 KiB]` 横排。
+
+        PROGRESS 实时进度显示在对应阶段的 detail（如 Push 的对象写入
+        百分比），不占日志流行，避免百分比逐条刷屏。
+        """
         blocks = []
         for st in stages:
             sym, color = _STATE_STYLE[st.state]
-            blocks.append(f"[{color}][{sym} {st.name}][/]")
+            label = st.name
+            if st.detail:
+                label += f" {st.detail}"
+            blocks.append(f"[{color}][{sym} {label}][/]")
         return "  " + " ".join(blocks)
 
     def _log_markup(self, level: str, message: str) -> str:
@@ -221,15 +228,16 @@ class PushView(ViewBase):
 
     # ── 事件驱动（主线程同步回调）──
     def _on_action_log(self, event: ActionLog) -> None:
-        """按阶段标识更新阶段状态；所有消息追加进日志流（一页流回显）。
+        """按阶段标识更新阶段状态；里程碑消息（非 PROGRESS）追加进日志流。
 
-        PROGRESS（实时进度）只更新 detail 不翻转状态——阶段仍在进行中，
-        详情列展示最新进度（如 push 的对象写入百分比）。
+        PROGRESS（实时进度）只更新对应阶段 detail 不翻转状态、不进日志流
+        （如 push 的对象写入百分比），避免百分比逐条刷屏占空间。
         """
         if not event.stage or self._session is None:
             return
         with self._lock:
-            self._append_log(event.level, event.message)
+            if event.level != "PROGRESS":
+                self._append_log(event.level, event.message)
             st = next((s for s in self._stages if s.token == event.stage), None)
             if st is not None:
                 if event.level == "ACTION":
