@@ -52,7 +52,7 @@ github_sync.bat          # Windows 启动器（纯批处理，零 PowerShell）�
 │   ├── screen.py        # render_header / render_menu / render_status_line 纯函数
 │   ├── interactive.py   # InteractiveApp：骨架首帧（info=None 零 I/O）+ 非阻塞主循环（poll_key 轮询 + queue 脏标志 drain）+ 状态/版本后台加载 + 顶栏常驻 + 标签页单循环派发
 │   ├── view_base.py     # ViewBase：activate/render/handle_key/invalidate + loading 态（executor 后台加载）
-│   ├── push_view.py     # 推送标签页：推送会话阶段进度视图（会话头 + [k/n] 阶段行 + ·/…/✓/✕/- 状态符号 + PROGRESS 实时详情）
+│   ├── push_view.py     # 推送标签页：推送会话一页流（会话头 + 阶段摘要横排 + 实时日志流窗口）
 │   ├── pull_view.py     # 拉取标签页：本地历史提交，首个 Enter 对齐远程，其余恢复
 │   ├── files_view.py    # 文件标签页：↑↓ 移动，Enter 切换推送/忽略
 │   ├── branch_view.py   # 分支标签页：首行合并到 main，下方分支列表 Enter 切换
@@ -177,7 +177,7 @@ python -m main
 - **禁止在渲染路径中执行子进程调用**（`build_screen`/`render_*` 只读缓存）
 
 ### 无回显化（同步操作结果由视图状态表达）
-- 推送：`PushView`（`tui/push_view.py`）推送会话阶段进度视图——按 Enter 后按状态预构建阶段清单（init/config/scan/commit/push/release），订阅带 stage 标识的 ActionLog 驱动阶段状态机：`·` 未开始 / `…` 进行中 / `✓` 完成（绿）/ `✕` 失败（红）/ `-` 未执行（灰）；会话头表达整体结果（`推送完成（N 项更改）` / `推送失败: 原因`）；阶段行 detail 随事件实时刷新——scan/commit 显示变更数、push 阶段显示对象写入进度（`git push --progress` 经 `run_command_stream` 流式解析，PROGRESS 事件只更新 detail 不翻转状态）；git 仍为一次 commit + push
+- 推送：`PushView`（`tui/push_view.py`）推送会话一页流视图——按 Enter 后按状态预构建阶段清单（init/config/scan/commit/push/release），一页内同时呈现：会话头（`推送完成（N 项更改）` / `推送失败: 原因`）、阶段摘要行（英文短名横排 `[✓ Scan] [✓ Commit] [… Push]`，状态符号 `·` 未开始 / `…` 进行中 / `✓` 完成 / `✕` 失败 / `-` 未执行）、日志流窗口（ActionLog 消息逐行追加滚动，按级别着色：`>` ACTION/NOTE/PROGRESS、`✓` DONE、`✕` FAIL；窗口行数 = 可用行数 - 2，超出滚动挤掉最旧）；实时进度（`git push --progress` 经 `run_command_stream` 流式解析）同时更新阶段摘要与追加日志流；git 仍为一次 commit + push
 - 拉取：`PullView`（`tui/pull_view.py`）通过 `GitProvider.remote_head()` 取远程跟踪引用，本地与远程一致的提交 hash 标浅绿 `COLOR_CYAN`（#ABDFA7，与 [✓] 同色），其余不变色
 - 文件标签页：`FileOpsService.push_file/remove_file` 返回 bool，失败文件行首 `[!]`（红），按钮状态切换即成功指示
 - 失败原因由 i18n 可读消息表达（`推送失败: 网络连接异常…`），原始命令输出落盘 logs/ 供 AI 调试（排查用 CLI `status`）

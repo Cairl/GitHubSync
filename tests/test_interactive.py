@@ -531,7 +531,7 @@ def test_file_ops_push_file_returns_bool():
 
 
 def test_push_renders_stage_progress():
-    """按 Enter 推送：推送页显示阶段进度视图（扫描/提交/推送 ✓），非日志流。"""
+    """按 Enter 推送：推送页一页流（会话头 + 阶段摘要 + 日志流），非 CLI 日志。"""
     svc = make_services(initialized=True, remote="x", files={"a.py": "1", "b.py": "2"})
     out_lines = []
     app = InteractiveApp(svc, "fake_repo",
@@ -542,10 +542,11 @@ def test_push_renders_stage_progress():
     out = app._view
     lines = out.splitlines()
     assert "Push completed (2 change(s))" in lines[0]  # 会话头
-    assert any("Scanning changes" in ln and "✓" in ln for ln in lines)
-    assert any("Commit" in ln and "✓" in ln for ln in lines)
-    assert any("Push" in ln and "✓" in ln for ln in lines)
-    assert "[OK]" not in out and "> " not in out      # 无日志流回显
+    assert any("[✓ Scan]" in ln for ln in lines)       # 阶段摘要横排
+    assert any("[✓ Commit]" in ln for ln in lines)
+    assert any("[✓ Push]" in ln for ln in lines)
+    assert any("Scanning changes" in ln for ln in lines)   # 日志流
+    assert "[OK]" not in out and "$ git" not in out        # 无命令回显
     assert svc.git.commits                            # 确实推送了
 
 
@@ -563,7 +564,7 @@ def test_push_failure_renders_error():
     lines = out.splitlines()
     assert ("Push failed: "
             "Network error: check your connection or proxy settings") in lines[0]
-    assert any("Push" in ln and "✕" in ln for ln in lines)  # 失败阶段
+    assert any("[✕ Push]" in ln for ln in lines)  # 失败阶段
 
 
 def test_push_no_changes_renders_stages():
@@ -578,8 +579,8 @@ def test_push_no_changes_renders_stages():
     assert svc.git.initialized  # 仓库已初始化
     out = app._view
     lines = out.splitlines()
-    assert any("Init repository" in ln and "✓" in ln for ln in lines)
-    assert any("Config remote" in ln and "✓" in ln for ln in lines)
+    assert any("[✓ Init]" in ln for ln in lines)
+    assert any("[✓ Config]" in ln for ln in lines)
     assert "Push completed" in lines[0]
 
 
