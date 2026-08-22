@@ -240,18 +240,22 @@ def test_push_view_empty_shows_hint():
 
 
 def test_push_view_idle_shows_change_count():
-    """开屏按 Enter 前显示本次变更数，无变更时不显示。"""
-    # 有变更：显示 N change(s)
+    """开屏按 Enter 前显示扫描结论两行：第二行区分有无变化，格式一致。"""
+    # 有变更：第二行显示 N change(s)
     svc, view, _ = _make_push_view(initialized=True, remote="x",
                                    files={"a.py": "1", "b.py": "2"})
     view.activate()
     out = view.render()
-    assert "2 change(s)" in out.splitlines()[0]
-    # 无变更：内容为空
+    lines = out.splitlines()
+    assert "✓ Scanning complete" in lines[0]
+    assert "2 change(s)" in lines[1]
+    # 无变更：同样两行格式，第二行换成无需提交
     svc, view, _ = _make_push_view(initialized=True, remote="x")
     view.activate()
     out = view.render()
-    assert "change(s)" not in out
+    lines = out.splitlines()
+    assert "✓ Scanning complete" in lines[0]
+    assert "No changes to commit" in lines[1]
 
 
 def test_push_view_no_repo_idle_empty():
@@ -264,13 +268,14 @@ def test_push_view_no_repo_idle_empty():
 
 
 def test_push_view_idle_to_session_grows_lines():
-    """开屏单行变更数；Enter 后阶段行逐行累积（行数增长）。"""
+    """开屏扫描结论两行；Enter 后阶段行逐行累积（行数增长）。"""
     svc, view, _ = _make_push_view(initialized=True, remote="x",
                                    files={"a.py": "1", "b.py": "2"})
     view._max_rows = lambda: 6
     view.activate()
-    idle_lines = view._render_lines()          # 空态：单行变更数
-    assert "2 change(s)" in idle_lines[0]
+    idle_lines = view._render_lines()          # 空态：扫描结论两行
+    assert "✓" in idle_lines[0] and "Scanning complete" in idle_lines[0]
+    assert "2 change(s)" in idle_lines[1]
     view.handle_key(KEY_ENTER)
     session_lines = view._render_lines()
     assert len(session_lines) > len(idle_lines)     # 阶段行累积增长
