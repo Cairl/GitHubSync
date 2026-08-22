@@ -28,6 +28,7 @@ from core.config import (COLOR_ERROR, COLOR_GRAY, COLOR_PLACEHOLDER,
                          COLOR_PUSH_PENDING, COLOR_SUCCESS_SOFT, KEY_ENTER)
 from core.events import (ActionLog, DomainEventBus, SyncCompleted, SyncFailed)
 from core.exceptions import SyncError
+from core.i18n import tr
 from core.protocols import GitProvider
 from core.status import RepoInfo, RepoStatus
 from core.sync_service import SyncService
@@ -122,6 +123,9 @@ class PushView(ViewBase):
         框架（按当前状态预判的待执行阶段 + 空日志窗口），与推送会话行数
         一致——开屏即一页流，Enter 后仅增量更新，无整屏跳变。阶段摘要之上
         不显示任何行（无提示文字、无会话头），整体状态由日志流表达。
+
+        无会话时 Scan 阶段显示工作区变更数（如 `[· Scan 2 change(s)]`），
+        按 Enter 前即可确认本次是否有变更。
         """
         with self._lock:
             stages = list(self._stages)
@@ -131,6 +135,12 @@ class PushView(ViewBase):
             # 无会话：一页流框架（预判阶段 + 空日志窗口）
             info = self._get_info()
             stages = self._plan_stages(info) if info is not None else []
+            if info is not None and info.change_count:
+                scan = next((s for s in stages if s.token == "scan"), None)
+                if scan is not None:
+                    scan.detail = tr(
+                        f"{info.change_count} 处变化",
+                        f"{info.change_count} change(s)")
             logs = []
         limit = self._max_rows() if self._max_rows is not None else None
         window = max(1, limit - 1) if limit is not None else None

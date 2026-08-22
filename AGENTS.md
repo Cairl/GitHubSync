@@ -177,7 +177,7 @@ python -m main
 - **禁止在渲染路径中执行子进程调用**（`build_screen`/`render_*` 只读缓存）
 
 ### 无回显化（同步操作结果由视图状态表达）
-- 推送：`PushView`（`tui/push_view.py`）推送会话一页流视图——按 Enter 后按状态预构建阶段清单（init/config/scan/commit/push/release），一页内同时呈现：阶段摘要行（英文短名横排 `[✓ Scan] [✓ Commit] [… Push 100% (13/13) · 2.78 KiB]`，状态符号 `·` 未开始 / `…` 进行中 / `✓` 完成 / `✕` 失败 / `-` 未执行；实时进度并入对应阶段 detail，不占日志行）、日志流窗口（仅里程碑消息 ACTION/DONE/NOTE/FAIL 逐行追加滚动，按级别着色：`>` ACTION/NOTE、`✓` DONE、`✕` FAIL；窗口行数 = 可用行数 - 1，超出滚动挤掉最旧）；`git push --progress` 经 `run_command_stream` 流式解析，PROGRESS 事件只更新摘要 detail 不进日志流，避免百分比逐条刷屏；git 仍为一次 commit + push
+- 推送：`PushView`（`tui/push_view.py`）推送会话一页流视图——按 Enter 后按状态预构建阶段清单（init/config/scan/commit/push/release），一页内同时呈现：阶段摘要行（英文短名横排 `[✓ Scan] [✓ Commit] [… Push 100% (13/13) · 2.78 KiB]`，状态符号 `·` 未开始 / `…` 进行中 / `✓` 完成 / `✕` 失败 / `-` 未执行；实时进度并入对应阶段 detail，不占日志行；无会话时 Scan 阶段显示工作区变更数 `[· Scan 2 change(s)]`，按 Enter 前即可确认本次变更）、日志流窗口（仅里程碑消息 ACTION/DONE/NOTE/FAIL 逐行追加滚动，按级别着色：`>` ACTION/NOTE、`✓` DONE、`✕` FAIL；窗口行数 = 可用行数 - 1，超出滚动挤掉最旧）；`git push --progress` 经 `run_command_stream` 流式解析，PROGRESS 事件只更新摘要 detail 不进日志流，避免百分比逐条刷屏；git 仍为一次 commit + push
 - 拉取：`PullView`（`tui/pull_view.py`）通过 `GitProvider.remote_head()` 取远程跟踪引用，本地与远程一致的提交 hash 标浅绿 `COLOR_CYAN`（#ABDFA7，与 [✓] 同色），其余不变色
 - 文件标签页：`FileOpsService.push_file/remove_file` 返回 bool，失败文件行首 `[!]`（红），按钮状态切换即成功指示
 - 失败原因由 i18n 可读消息表达（`推送失败: 网络连接异常…`），原始命令输出落盘 logs/ 供 AI 调试（排查用 CLI `status`）

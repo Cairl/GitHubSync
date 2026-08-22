@@ -104,7 +104,7 @@ def test_push_view_no_porcelain_scan():
     view.activate()
     view.activate()
     assert svc.git.porcelain_calls == base  # 懒加载不扫描清单
-    assert "[· Scan]" in view.render()      # 空态一页流框架
+    assert "[· Scan 1 change(s)]" in view.render()  # 空态一页流框架（含变更数）
     view.invalidate()
     view.activate()
     assert svc.git.porcelain_calls == base  # 失效重扫同样零扫描
@@ -260,6 +260,22 @@ def test_push_view_empty_shows_hint():
     assert "Press Enter to push" not in out               # 无提示文字
 
 
+def test_push_view_idle_shows_change_count():
+    """开屏按 Enter 前显示本次变更数（Scan 阶段 detail），无变更时不显示。"""
+    # 有变更：Scan 阶段显示 N change(s)
+    svc, view, _ = _make_push_view(initialized=True, remote="x",
+                                   files={"a.py": "1", "b.py": "2"})
+    view.activate()
+    out = view.render()
+    assert "[· Scan 2 change(s)]" in out.splitlines()[0]
+    # 无变更：Scan 阶段无 detail
+    svc, view, _ = _make_push_view(initialized=True, remote="x")
+    view.activate()
+    out = view.render()
+    assert "[· Scan]" in out.splitlines()[0]
+    assert "change(s)" not in out.splitlines()[0]
+
+
 def test_push_view_empty_preplans_stages_by_status():
     """NO_REPO：空会话预判 init/config 阶段（与推送阶段一致，不跳界面）。"""
     svc, view, _ = _make_push_view(initialized=False, remote=None)
@@ -293,7 +309,7 @@ def test_push_view_idle_to_session_same_rowcount():
     view.handle_key(KEY_ENTER)
     session_lines = view._render_lines()
     assert len(idle_lines) == len(session_lines) == 6  # 行数恒定
-    assert "[· Scan]" in idle_lines[0]          # 首行即阶段摘要
+    assert "[· Scan 2 change(s)]" in idle_lines[0]   # 首行即阶段摘要（含变更数）
     assert "[✓ Scan" in session_lines[0]
 
 
