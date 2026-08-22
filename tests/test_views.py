@@ -104,7 +104,7 @@ def test_push_view_no_porcelain_scan():
     view.activate()
     view.activate()
     assert svc.git.porcelain_calls == base  # 懒加载不扫描清单
-    assert "Press Enter to push" in view.render()
+    assert "[· Scan]" in view.render()      # 空态一页流框架
     view.invalidate()
     view.activate()
     assert svc.git.porcelain_calls == base  # 失效重扫同样零扫描
@@ -253,14 +253,16 @@ def test_push_view_compress_hides_skipped(tmp_path):
 
 
 def test_push_view_empty_shows_hint():
-    """空会话：推送页显示提示头 + 预判阶段摘要（无差异摘要行）。"""
+    """空会话：推送页直接显示阶段摘要框架，无顶部提示文字。"""
     svc, view, _ = _make_push_view(initialized=True, remote="x")
     view.activate()
     out = view.render()
-    assert "Press Enter to push" in out.splitlines()[0]  # 提示头
+    lines = out.splitlines()
+    assert lines[0] == ""                                 # 顶部空行占位
     assert "[· Scan]" in out                              # 预判阶段摘要
     assert "[· Commit]" in out
     assert "[· Push]" in out
+    assert "Press Enter to push" not in out               # 无提示文字
 
 
 def test_push_view_empty_preplans_stages_by_status():
@@ -296,7 +298,7 @@ def test_push_view_idle_to_session_same_rowcount():
     view.handle_key(KEY_ENTER)
     session_lines = view._render_lines()
     assert len(idle_lines) == len(session_lines) == 6  # 行数恒定
-    assert "Press Enter to push" in idle_lines[0]
+    assert idle_lines[0] == ""                  # 顶部空行占位
     assert "Push completed" in session_lines[0]
 
 
@@ -555,10 +557,10 @@ def test_empty_state_none_colored_gray(monkeypatch, tmp_path):
     import tui.renderer
     monkeypatch.setattr(tui.renderer, "supports_color", lambda stream: True)
     gray = "\x1b[38;2;99;99;99m"
-    # 推送（空日志：Enter 提示行灰色）
+    # 推送（空会话：阶段摘要符号灰色 #636363 占位色）
     _, push, _ = _make_push_view(initialized=True, remote="x")
     push.activate()
-    assert gray in push.render() and "Press Enter to push" in push.render()
+    assert gray in push.render() and "[· Scan]" in push.render()
     # 拉取（无提交历史）
     _, pull = _make_pull_view(initialized=True, remote="x", commits=[])
     pull.activate()

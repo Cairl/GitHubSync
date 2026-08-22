@@ -1,7 +1,7 @@
 """推送标签页：推送会话一页流视图（阶段摘要 + 实时日志流，全程一屏）。
 
 开屏即一页流框架，Enter 推送前后不跳界面：
-- 无会话：提示头「按 Enter 推送」+ 按当前状态预判的待执行阶段摘要
+- 无会话：顶部空行 + 按当前状态预判的待执行阶段摘要
   （`[· Scan] [· Commit] [· Push]`）+ 空日志窗口，与推送会话行数一致；
 - 会话头：整体状态（推送中… / 推送完成（N 项更改）/ 推送失败：原因）；
 - 阶段摘要：一行横排展示全部阶段状态（`[✓ Scan] [✓ Commit] [… Push]`
@@ -122,7 +122,7 @@ class PushView(ViewBase):
         """当前视图的 markup 行列表：会话头 + 阶段摘要行 + 日志流窗口。
 
         行数恒定 = 2 + 日志窗口（不足补空行占位）。无会话时同样渲染一页流
-        框架（提示头 + 按当前状态预判的待执行阶段 + 空日志窗口），与推送
+        框架（顶部空行 + 按当前状态预判的待执行阶段 + 空日志窗口），与推送
         会话行数一致——开屏即一页流，Enter 后仅增量更新，无整屏跳变。
         """
         with self._lock:
@@ -131,11 +131,10 @@ class PushView(ViewBase):
             header = self._header
             logs = list(self._log_lines)
         if session is None:
-            # 无会话：一页流框架（提示头 + 预判阶段 + 空日志窗口）
+            # 无会话：一页流框架（顶部空行占位 + 预判阶段 + 空日志窗口）
             info = self._get_info()
             stages = self._plan_stages(info) if info is not None else []
-            header = (f"[{COLOR_PLACEHOLDER}]"
-                      f"{tr('按 Enter 推送', 'Press Enter to push')}[/]")
+            header = ""
             logs = []
         limit = self._max_rows() if self._max_rows is not None else None
         window = max(1, limit - 2) if limit is not None else None
