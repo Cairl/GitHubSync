@@ -230,12 +230,13 @@ def test_push_view_stage_lines_layout(tmp_path):
 
 
 def test_push_view_empty_shows_hint():
-    """空会话（无变更）：无提示文字，内容为空。"""
+    """空会话（无变更）：免 Enter 预显示扫描结论两行（✓ 扫描完成 / 无需提交）。"""
     svc, view, _ = _make_push_view(initialized=True, remote="x")
     view.activate()
     out = view.render()
-    assert out.strip() == ""                # 无变更无内容
-    assert "Press Enter to push" not in out  # 无提示文字
+    assert "✓ Scanning complete" in out          # 扫描结论行 1
+    assert "No changes to commit" in out         # 扫描结论行 2
+    assert "Press Enter to push" not in out      # 无提示文字
 
 
 def test_push_view_idle_shows_change_count():

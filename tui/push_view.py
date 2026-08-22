@@ -1,8 +1,9 @@
 """推送标签页：推送会话阶段行累积回显（每阶段一行，完成留痕）。
 
 开屏即一屏框架，Enter 推送前后不跳界面：
-- 无会话：单行显示本次变更数（`  3 change(s)`，无变更时为空行），
-  按 Enter 前即可确认本次是否有变更；
+- 无会话：单行显示本次变更数（`  3 change(s)`），按 Enter 前即可确认
+  本次是否有变更；无变更时预显示扫描结论两行（`✓ 扫描完成` +
+  `> 没有需要提交的更改`），免 Enter 即见；未初始化/错误状态为空；
 - 推送中：每个阶段一行（初始化/配置/扫描/提交/推送/发布），按出现
   顺序累积——进行中行 `> 当前动作`，完成行 `✓ 结果` 保留不覆盖，
   失败行 `✕ 原因`；push 阶段实时进度（百分比 + 对象数）拼在当前
@@ -27,7 +28,7 @@ from core.events import (ActionLog, DomainEventBus, SyncCompleted, SyncFailed)
 from core.exceptions import SyncError
 from core.i18n import tr
 from core.protocols import GitProvider
-from core.status import RepoInfo
+from core.status import RepoInfo, RepoStatus
 from core.sync_service import SyncService
 
 from .renderer import markup_to_ansi
@@ -85,7 +86,9 @@ class PushView(ViewBase):
     def _render_lines(self) -> list[str]:
         """当前视图的 markup 行列表：无会话为变更数行，会话为阶段行累积。
 
-        无会话：单行变更数（`  3 change(s)`，无变更时为空列表）；
+        无会话：有变更为单行变更数（`  3 change(s)`）；无变更预显示扫描
+        结论两行（`✓ 扫描完成` + `> 没有需要提交的更改`，免 Enter 即见）；
+        未初始化/错误状态为空。
         推送中/结束：每个阶段一行按出现顺序累积，完成留痕、失败红色，
         超出内容区可用行数时截断保留末尾（最新阶段）。
         """
@@ -94,13 +97,20 @@ class PushView(ViewBase):
             order = list(self._stage_order)
             stage = dict(self._stage)
         if session is None:
-            # 无会话：变更数行（无变更则空）
+            # 无会话：有变更显示变更数；无变更预显示扫描结论
             info = self._get_info()
-            if info is not None and info.change_count:
+            if info is None or info.status in (RepoStatus.NO_REPO,
+                                               RepoStatus.ERROR):
+                return []
+            if info.change_count:
                 return ["  " + f"[{COLOR_GRAY}]"
                         + tr(f"{info.change_count} 处变化",
                              f"{info.change_count} change(s)") + "[/]"]
-            return []
+            return [self._log_markup("DONE",
+                                     tr("扫描完成", "Scanning complete")),
+                    self._log_markup("NOTE",
+                                     tr("没有需要提交的更改",
+                                        "No changes to commit"))]
         lines = [self._log_markup(level, message)
                  for key in order for level, message in [stage[key]]]
         limit = self._max_rows() if self._max_rows is not None else None
