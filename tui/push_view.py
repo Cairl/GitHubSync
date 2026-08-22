@@ -1,13 +1,12 @@
 """推送标签页：推送会话一页流视图（阶段摘要 + 实时日志流，全程一屏）。
 
 开屏即一页流框架，Enter 推送前后不跳界面：
-- 无会话：顶部空行 + 按当前状态预判的待执行阶段摘要
-  （`[· Scan] [· Commit] [· Push]`）+ 空日志窗口，与推送会话行数一致；
-- 会话头：整体状态（推送中… / 推送完成（N 项更改）/ 推送失败：原因）；
-- 阶段摘要：一行横排展示全部阶段状态（`[✓ Scan] [✓ Commit] [… Push]`
-  状态符号 + 英文短名，一目了然）；
+- 阶段摘要：首行横排展示全部阶段状态（`[✓ Scan] [✓ Commit] [… Push]`
+  状态符号 + 英文短名），其上不显示任何行；无会话时按当前状态预判
+  待执行阶段（`[· Scan] [· Commit] [· Push]`）；
 - 日志流：下方固定行数窗口，ActionLog 消息逐行追加滚动（ACTION/DONE/
-  NOTE/FAIL/PROGRESS 全量落流，按级别着色），回显详细、自然滚动。
+  NOTE/FAIL/PROGRESS 全量落流，按级别着色），回显详细、自然滚动；
+  会话整体结果（推送完成 / 失败原因）由日志流表达。
 
 阶段标识由 ActionLog.stage 携带（结构化事件驱动）：core 服务在发布时
 标注阶段，表现层按阶段状态机更新，而非解析日志文本。CLI 等纯文本
@@ -101,7 +100,6 @@ class PushView(ViewBase):
         self._max_rows = max_rows    # 内容区可用行数；日志流窗口 = 行数 - 2（头+摘要）
         self._stages: list[_Stage] = []   # 当前会话阶段
         self._session: str | None = None  # None（无会话）/ running / done / failed
-        self._header = ""                 # 会话头（markup）
         self._log_lines: list[str] = []   # 日志流（markup 行，追加滚动）
         self._last_lines: list[str] | None = None  # 上次渲染行（markup，增量对比基准）
         self._lock = threading.Lock()
@@ -119,31 +117,30 @@ class PushView(ViewBase):
         return markup_to_ansi("\n".join(self._render_lines()))
 
     def _render_lines(self) -> list[str]:
-        """当前视图的 markup 行列表：会话头 + 阶段摘要行 + 日志流窗口。
+        """当前视图的 markup 行列表：阶段摘要行 + 日志流窗口。
 
-        行数恒定 = 2 + 日志窗口（不足补空行占位）。无会话时同样渲染一页流
-        框架（顶部空行 + 按当前状态预判的待执行阶段 + 空日志窗口），与推送
-        会话行数一致——开屏即一页流，Enter 后仅增量更新，无整屏跳变。
+        行数恒定 = 1 + 日志窗口（不足补空行占位）。无会话时同样渲染一页流
+        框架（按当前状态预判的待执行阶段 + 空日志窗口），与推送会话行数
+        一致——开屏即一页流，Enter 后仅增量更新，无整屏跳变。阶段摘要之上
+        不显示任何行（无提示文字、无会话头），整体状态由日志流表达。
         """
         with self._lock:
             stages = list(self._stages)
             session = self._session
-            header = self._header
             logs = list(self._log_lines)
         if session is None:
-            # 无会话：一页流框架（顶部空行占位 + 预判阶段 + 空日志窗口）
+            # 无会话：一页流框架（预判阶段 + 空日志窗口）
             info = self._get_info()
             stages = self._plan_stages(info) if info is not None else []
-            header = ""
             logs = []
         limit = self._max_rows() if self._max_rows is not None else None
-        window = max(1, limit - 2) if limit is not None else None
+        window = max(1, limit - 1) if limit is not None else None
         if window is not None:
             tail = logs[-window:]
             padded = [""] * (window - len(tail)) + tail
         else:
             padded = logs
-        return [header, self._stage_summary_line(stages)] + padded
+        return [self._stage_summary_line(stages)] + padded
 
     def _stage_summary_line(self, stages: list[_Stage]) -> str:
         """阶段摘要行：`  [✓ Scan] [… Push]` 横排，全部阶段一屏可见。"""
@@ -175,15 +172,13 @@ class PushView(ViewBase):
     def _start_push(self) -> None:
         """开启推送会话：fetch 刷新远程状态 → 构建阶段清单 → 执行同步。
 
-        会话视图先行渲染（推送中… + 阶段摘要 + 空日志流），随后事件驱动
-        追加刷新。
+        会话视图先行渲染（阶段摘要 + 空日志流），随后事件驱动追加刷新。
         """
         info = self._refresh_status(True)  # fetch 刷新远程状态（分叉/落后检测可靠）
         stages = self._plan_stages(info)
         with self._lock:
             self._stages = stages
             self._session = "running"
-            self._header = f"[{COLOR_PUSH_PENDING}]{tr('推送中…', 'Pushing…')}[/]"
             self._log_lines = []
         self._refresh()  # 行数变化（摘要 → 会话）：整区重绘
         try:
@@ -252,11 +247,9 @@ class PushView(ViewBase):
         self._refresh()
 
     def _on_sync_failed(self, event: SyncFailed) -> None:
-        """会话失败：头行带失败原因，进行中/未开始的阶段标失败。"""
+        """会话失败：失败原因进日志流，进行中/未开始的阶段标失败。"""
         with self._lock:
             self._session = "failed"
-            self._header = (f"[{COLOR_ERROR}]{tr('推送失败:', 'Push failed:')}[/]"
-                            f" {event.message}")
             self._append_log("FAIL", event.message)
             target = next((s for s in reversed(self._stages)
                            if s.state in ("running", "pending")), None)
@@ -265,7 +258,7 @@ class PushView(ViewBase):
         self._refresh()
 
     def _on_sync_completed(self, event: SyncCompleted) -> None:
-        """会话完成：头行带变更数量，未执行阶段标跳过。"""
+        """会话完成：完成消息进日志流，未执行阶段标跳过。"""
         with self._lock:
             self._session = "done"
             n = len(event.updated_items)
@@ -274,7 +267,6 @@ class PushView(ViewBase):
                 message = tr(f"推送完成（{detail}）", f"Push completed ({detail})")
             else:
                 message = tr("推送完成", "Push completed")
-            self._header = f"[{COLOR_SUCCESS_SOFT}]{message}[/]"
             self._append_log("DONE", message)  # 纯文本消息，避免嵌套 markup
             for st in self._stages:
                 if st.state in ("pending", "running"):

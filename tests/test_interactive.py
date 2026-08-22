@@ -531,7 +531,7 @@ def test_file_ops_push_file_returns_bool():
 
 
 def test_push_renders_stage_progress():
-    """按 Enter 推送：推送页一页流（会话头 + 阶段摘要 + 日志流），非 CLI 日志。"""
+    """按 Enter 推送：推送页一页流（阶段摘要首行 + 日志流），非 CLI 日志。"""
     svc = make_services(initialized=True, remote="x", files={"a.py": "1", "b.py": "2"})
     out_lines = []
     app = InteractiveApp(svc, "fake_repo",
@@ -541,17 +541,17 @@ def test_push_renders_stage_progress():
         app.run()
     out = app._view
     lines = out.splitlines()
-    assert "Push completed (2 change(s))" in lines[0]  # 会话头
-    assert any("[✓ Scan]" in ln for ln in lines)       # 阶段摘要横排
+    assert "[✓ Scan]" in lines[0]                          # 首行即阶段摘要
     assert any("[✓ Commit]" in ln for ln in lines)
     assert any("[✓ Push]" in ln for ln in lines)
+    assert any("Push completed (2 change(s))" in ln for ln in lines)  # 结果进日志流
     assert any("Scanning changes" in ln for ln in lines)   # 日志流
     assert "[OK]" not in out and "$ git" not in out        # 无命令回显
     assert svc.git.commits                            # 确实推送了
 
 
 def test_push_failure_renders_error():
-    """推送失败：会话头带失败原因，失败阶段 ✕。"""
+    """推送失败：阶段摘要失败阶段 ✕，失败原因进日志流。"""
     svc = make_services(initialized=True, remote="x", files={"a.py": "1"})
     svc.git.fail_mode = "network"  # 持久推送失败 → SyncError
     out_lines = []
@@ -562,9 +562,8 @@ def test_push_failure_renders_error():
         app.run()
     out = app._view
     lines = out.splitlines()
-    assert ("Push failed: "
-            "Network error: check your connection or proxy settings") in lines[0]
-    assert any("[✕ Push]" in ln for ln in lines)  # 失败阶段
+    assert "[✕ Push]" in lines[0]  # 失败阶段
+    assert any("Network error" in ln for ln in lines)  # 失败原因进日志流（✕ FAIL 行）
 
 
 def test_push_no_changes_renders_stages():
@@ -579,9 +578,9 @@ def test_push_no_changes_renders_stages():
     assert svc.git.initialized  # 仓库已初始化
     out = app._view
     lines = out.splitlines()
-    assert any("[✓ Init]" in ln for ln in lines)
+    assert "[✓ Init]" in lines[0]
     assert any("[✓ Config]" in ln for ln in lines)
-    assert "Push completed" in lines[0]
+    assert any("Push completed" in ln for ln in lines)  # 结果进日志流
 
 
 def test_push_session_persists_after_tab_switch():

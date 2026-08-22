@@ -121,10 +121,10 @@ def test_push_view_enter_renders_stages():
     assert svc.git.fetch_calls == 1                # fetch 恰好一次
     out = view.render()
     lines = out.splitlines()
-    assert "Push completed (2 change(s))" in lines[0]  # 会话头
-    assert any("[✓ Scan]" in ln for ln in lines)       # 阶段摘要横排
+    assert "[✓ Scan]" in lines[0]                          # 首行即阶段摘要
     assert any("[✓ Commit]" in ln for ln in lines)
     assert any("[✓ Push]" in ln for ln in lines)
+    assert any("Push completed (2 change(s))" in ln for ln in lines)  # 结果进日志流
     assert any("Scanning changes" in ln for ln in lines)   # 日志流 ACTION 行
     assert any("Committed 2 change(s)" in ln for ln in lines)
     assert "[OK]" not in out and "$ git" not in out  # 无日志流回显（日志流无命令输出）
@@ -149,10 +149,10 @@ def test_push_view_no_changes_still_syncs():
     assert svc.git.initialized
     out = view.render()
     lines = out.splitlines()
-    assert "Push completed" in lines[0]
-    assert any("[✓ Init]" in ln for ln in lines)
+    assert "[✓ Init]" in lines[0]                          # 首行即阶段摘要
     assert any("[✓ Config]" in ln for ln in lines)
     assert any("Repository initialized" in ln for ln in lines)  # 日志流
+    assert any("Push completed" in ln for ln in lines)     # 结果进日志流
 
 
 def test_push_view_failure_renders_error():
@@ -164,11 +164,9 @@ def test_push_view_failure_renders_error():
     view.handle_key(KEY_ENTER)
     out = view.render()
     lines = out.splitlines()
-    assert ("Push failed: "
-            "Network error: check your connection or proxy settings") in lines[0]
-    assert any("[✕ Push]" in ln for ln in lines)      # 失败阶段
+    assert "[✕ Push]" in lines[0]                          # 首行即阶段摘要（失败阶段）
     assert any("[✓ Scan]" in ln for ln in lines)
-    assert any("Network error" in ln for ln in lines)  # 日志流含失败原因
+    assert any("Network error" in ln for ln in lines)      # 失败原因进日志流（✕ FAIL 行）
 
 
 def test_push_view_progress_updates_detail_keeps_state():
@@ -229,8 +227,8 @@ def test_push_view_release_stage_published(tmp_path):
     assert svc.gh.published                     # Release 确实发布
     out = view.render()
     lines = out.splitlines()
-    assert "Push completed" in lines[0]         # 会话完成头行
-    assert any("[✓ Release]" in ln for ln in lines)
+    assert "[✓ Release]" in lines[0]                       # 首行即阶段摘要
+    assert any("Push completed" in ln for ln in lines)     # 结果进日志流
     assert any("Publishing release" in ln for ln in lines)  # 日志流
 
 
@@ -245,21 +243,20 @@ def test_push_view_compress_hides_skipped(tmp_path):
     view.activate()
     view.handle_key(KEY_ENTER)
     lines = view.render().splitlines()
-    assert "Push completed" in lines[0]                       # 会话头保留
-    assert len(lines) == 4                                    # 一屏内：头 + 摘要 + 2 日志
+    assert "[✓ Scan]" in lines[0]                          # 首行即阶段摘要
+    assert len(lines) == 4                                    # 一屏内：摘要 + 3 日志
     assert any("[- Release]" in ln for ln in lines)           # skipped 阶段以 - 呈现
     assert "Push completed" in lines[-1]                      # 窗口保留最新日志
     assert "Scanning changes" not in lines                    # 旧日志被窗口挤出
 
 
 def test_push_view_empty_shows_hint():
-    """空会话：推送页直接显示阶段摘要框架，无顶部提示文字。"""
+    """空会话：推送页首行直接是阶段摘要框架，无顶部提示文字。"""
     svc, view, _ = _make_push_view(initialized=True, remote="x")
     view.activate()
     out = view.render()
     lines = out.splitlines()
-    assert lines[0] == ""                                 # 顶部空行占位
-    assert "[· Scan]" in out                              # 预判阶段摘要
+    assert "[· Scan]" in lines[0]                             # 首行即阶段摘要
     assert "[· Commit]" in out
     assert "[· Push]" in out
     assert "Press Enter to push" not in out               # 无提示文字
@@ -298,8 +295,8 @@ def test_push_view_idle_to_session_same_rowcount():
     view.handle_key(KEY_ENTER)
     session_lines = view._render_lines()
     assert len(idle_lines) == len(session_lines) == 6  # 行数恒定
-    assert idle_lines[0] == ""                  # 顶部空行占位
-    assert "Push completed" in session_lines[0]
+    assert "[· Scan]" in idle_lines[0]          # 首行即阶段摘要
+    assert "[✓ Scan]" in session_lines[0]
 
 
 # ── PullView ──
