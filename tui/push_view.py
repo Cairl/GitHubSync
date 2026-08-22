@@ -1,18 +1,19 @@
-"""推送标签页：推送会话一页流视图（竖排阶段行 + 实时日志流，全程一屏）。
+"""推送标签页：推送会话一页流视图（竖排阶段行 + 当前动作行，全程一屏）。
 
 开屏即一页流框架，Enter 推送前后不跳界面：
 - 阶段行：竖排展示全部阶段，每阶段一行 `  ✓ Scan`（状态符号 + 英文短名），
   对齐清楚；无会话时按当前状态预判待执行阶段（`· Scan` / `· Commit`），
   Scan 行显示本次变更数（`· Scan 3 change(s)`），按 Enter 前即可确认；
-- 日志流：下方固定行数窗口，ActionLog 里程碑消息（ACTION/DONE/NOTE/FAIL）
-  逐行追加滚动，按级别着色；会话整体结果（推送完成 / 失败原因）由日志流表达。
+- 动作行：阶段行下方固定一行，覆盖式显示当前正在做的动作（如
+  `> 推送到 GitHub`），不累积、不滚动；推送结束即显示最后结果
+  （`✓ 推送完成（N 项更改）` / `✕ 失败原因`）。
 
 阶段标识由 ActionLog.stage 携带（结构化事件驱动）：core 服务在发布时
 标注阶段，表现层按阶段状态机更新，而非解析日志文本。CLI 等纯文本
 消费者忽略该字段，零影响。
 
 推送过程中阶段行只显示符号变化（✓/…/✕），不显示进度细节——变更数只在
-开屏可见，实时进度（PROGRESS）不进日志流、不占阶段行，避免刷屏。
+开屏可见，实时进度（PROGRESS）只更新内部 detail 不渲染，避免刷屏。
 
 每次 Enter 开启新会话（覆盖上一次结果视图）；切出保留当前会话可切回查看。
 """
@@ -95,10 +96,10 @@ class PushView(ViewBase):
         self._refresh_status = refresh_status
         self._paint = paint
         self._patch = patch          # 定点更新单行（行号 1-based）；None 时退化为整区重绘
-        self._max_rows = max_rows    # 内容区可用行数；日志流窗口 = 行数 - 2（头+摘要）
+        self._max_rows = max_rows    # 内容区可用行数；日志行占 1 行，其余空行
         self._stages: list[_Stage] = []   # 当前会话阶段
         self._session: str | None = None  # None（无会话）/ running / done / failed
-        self._log_lines: list[str] = []   # 日志流（markup 行，追加滚动）
+        self._log_line: str = ""      # 当前动作行（markup，覆盖式不累积滚动）
         self._last_lines: list[str] | None = None  # 上次渲染行（markup，增量对比基准）
         self._lock = threading.Lock()
         # 事件订阅：sync.run() 主线程同步发布，回调可直绘
@@ -115,21 +116,22 @@ class PushView(ViewBase):
         return markup_to_ansi("\n".join(self._render_lines()))
 
     def _render_lines(self) -> list[str]:
-        """当前视图的 markup 行列表：竖排阶段行 + 日志流窗口。
+        """当前视图的 markup 行列表：竖排阶段行 + 当前动作行。
 
-        行数恒定 = 阶段行数 + 日志窗口（不足补空行占位）。无会话时同样渲染
-        一页流框架（按当前状态预判的待执行阶段 + 空日志窗口），与推送会话
+        行数恒定 = 阶段行数 + 1（动作行）+ 剩余空行占位。无会话时同样渲染
+        一页流框架（按当前状态预判的待执行阶段 + 空动作行），与推送会话
         行数一致——开屏即一页流，Enter 后仅增量更新，无整屏跳变。
 
         变更数只在开屏显示（Scan 行后 `· Scan 3 change(s)`），推送过程中
-        阶段行只显示符号变化（✓/…/✕），不显示进度细节。
+        阶段行只显示符号变化（✓/…/✕）。动作行覆盖式显示当前动作（如
+        `> 推送到 GitHub`），不累积、不滚动，结束前即为最后结果。
         """
         with self._lock:
             stages = list(self._stages)
             session = self._session
-            logs = list(self._log_lines)
+            log_line = self._log_line
         if session is None:
-            # 无会话：一页流框架（预判阶段 + 空日志窗口）
+            # 无会话：一页流框架（预判阶段 + 空动作行）
             info = self._get_info()
             stages = self._plan_stages(info) if info is not None else []
             if info is not None and info.change_count:
@@ -138,16 +140,13 @@ class PushView(ViewBase):
                     scan.detail = tr(
                         f"{info.change_count} 处变化",
                         f"{info.change_count} change(s)")
-            logs = []
+            log_line = ""
         stage_lines = self._stage_lines(stages, show_detail=(session is None))
         limit = self._max_rows() if self._max_rows is not None else None
-        window = max(0, limit - len(stage_lines)) if limit is not None else None
-        if window is not None:
-            tail = logs[-window:]
-            padded = [""] * (window - len(tail)) + tail
-        else:
-            padded = logs
-        return stage_lines + padded
+        lines = stage_lines + [log_line]
+        if limit is not None:
+            lines += [""] * max(0, limit - len(lines))
+        return lines
 
     def _stage_lines(self, stages: list[_Stage],
                      show_detail: bool = False) -> list[str]:
@@ -166,13 +165,13 @@ class PushView(ViewBase):
         return lines
 
     def _log_markup(self, level: str, message: str) -> str:
-        """日志流单行 markup：`  前缀 消息`，按级别着色。"""
+        """动作行 markup：`  前缀 消息`，按级别着色。"""
         prefix, color = _LOG_STYLE.get(level, (">", COLOR_GRAY))
         return f"  {prefix} [{color}]{message}[/]"
 
-    def _append_log(self, level: str, message: str) -> None:
-        """追加日志流行（已持锁调用）。"""
-        self._log_lines.append(self._log_markup(level, message))
+    def _set_log(self, level: str, message: str) -> None:
+        """覆盖式设置当前动作行（已持锁调用）；不累积、不滚动。"""
+        self._log_line = self._log_markup(level, message)
 
     # ── 键处理 ──
     def handle_key(self, key: bytes) -> list[str]:
@@ -187,14 +186,14 @@ class PushView(ViewBase):
     def _start_push(self) -> None:
         """开启推送会话：fetch 刷新远程状态 → 构建阶段清单 → 执行同步。
 
-        会话视图先行渲染（阶段摘要 + 空日志流），随后事件驱动追加刷新。
+        会话视图先行渲染（阶段摘要 + 空动作行），随后事件驱动覆盖刷新。
         """
         info = self._refresh_status(True)  # fetch 刷新远程状态（分叉/落后检测可靠）
         stages = self._plan_stages(info)
         with self._lock:
             self._stages = stages
             self._session = "running"
-            self._log_lines = []
+            self._log_line = ""
         self._refresh()  # 行数变化（摘要 → 会话）：整区重绘
         try:
             self.sync.run()  # 阶段事件经订阅增量刷新会话视图
@@ -237,16 +236,16 @@ class PushView(ViewBase):
 
     # ── 事件驱动（主线程同步回调）──
     def _on_action_log(self, event: ActionLog) -> None:
-        """按阶段标识更新阶段状态；里程碑消息（非 PROGRESS）追加进日志流。
+        """按阶段标识更新阶段状态；里程碑消息（非 PROGRESS）覆盖动作行。
 
-        PROGRESS（实时进度）只更新对应阶段 detail 不翻转状态、不进日志流
-        （如 push 的对象写入百分比），避免百分比逐条刷屏占空间。
+        PROGRESS（实时进度）只更新对应阶段 detail 不翻转状态、不显示
+        （如 push 的对象写入百分比），避免进度刷屏占空间。
         """
         if not event.stage or self._session is None:
             return
         with self._lock:
             if event.level != "PROGRESS":
-                self._append_log(event.level, event.message)
+                self._set_log(event.level, event.message)  # 覆盖：只显当前动作
             st = next((s for s in self._stages if s.token == event.stage), None)
             if st is not None:
                 if event.level == "ACTION":
@@ -263,10 +262,10 @@ class PushView(ViewBase):
         self._refresh()
 
     def _on_sync_failed(self, event: SyncFailed) -> None:
-        """会话失败：失败原因进日志流，进行中/未开始的阶段标失败。"""
+        """会话失败：失败原因覆盖动作行，进行中/未开始的阶段标失败。"""
         with self._lock:
             self._session = "failed"
-            self._append_log("FAIL", event.message)
+            self._set_log("FAIL", event.message)
             target = next((s for s in reversed(self._stages)
                            if s.state in ("running", "pending")), None)
             if target:

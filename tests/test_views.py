@@ -121,13 +121,11 @@ def test_push_view_enter_renders_stages():
     assert svc.git.fetch_calls == 1                # fetch 恰好一次
     out = view.render()
     lines = out.splitlines()
-    assert "✓ Scan" in lines[0]                          # 竖排阶段行
+    assert any("✓ Scan" in ln for ln in lines)                          # 竖排阶段行
     assert any("✓ Commit" in ln for ln in lines)
     assert any("✓ Push" in ln for ln in lines)
-    assert any("Push completed (2 change(s))" in ln for ln in lines)  # 结果进日志流
-    assert any("Scanning changes" in ln for ln in lines)   # 日志流 ACTION 行
-    assert any("Committed 2 change(s)" in ln for ln in lines)
-    assert "[OK]" not in out and "$ git" not in out  # 无日志流回显（日志流无命令输出）
+    assert any("Push completed (2 change(s))" in ln for ln in lines)  # 动作行=最后结果
+    assert "[OK]" not in out and "$ git" not in out  # 无日志流回显（动作行无命令输出）
 
 
 def test_push_view_session_persists_across_switch():
@@ -149,10 +147,9 @@ def test_push_view_no_changes_still_syncs():
     assert svc.git.initialized
     out = view.render()
     lines = out.splitlines()
-    assert "✓ Init" in lines[0]                          # 竖排阶段行
+    assert any("✓ Init" in ln for ln in lines)                          # 竖排阶段行
     assert any("✓ Config" in ln for ln in lines)
-    assert any("Repository initialized" in ln for ln in lines)  # 日志流
-    assert any("Push completed" in ln for ln in lines)     # 结果进日志流
+    assert any("Push completed" in ln for ln in lines)     # 动作行=最后结果
 
 
 def test_push_view_failure_renders_error():
@@ -208,9 +205,7 @@ def test_push_view_progress_via_full_sync(tmp_path):
     assert "16% (1/6)" not in out            # 进度不占行
     assert any("✓ Push" in ln for ln in lines)  # 阶段行只显示符号
     assert "512 B" not in out                # 进度 detail 不渲染
-    assert any("Scanning changes" in ln for ln in lines)     # 日志流 ACTION
-    assert any("Pushing to GitHub" in ln for ln in lines)    # 日志流 ACTION
-    assert any("Push completed (2 change(s))" in ln for ln in lines)  # 结果
+    assert any("Push completed (2 change(s))" in ln for ln in lines)  # 动作行=结果
 
 
 def test_push_view_release_stage_published(tmp_path):
@@ -226,8 +221,7 @@ def test_push_view_release_stage_published(tmp_path):
     out = view.render()
     lines = out.splitlines()
     assert any("✓ Release" in ln for ln in lines)          # 竖排阶段行
-    assert any("Push completed" in ln for ln in lines)     # 结果进日志流
-    assert any("Publishing release" in ln for ln in lines)  # 日志流
+    assert any("Published" in ln for ln in lines)          # 动作行=最后结果（release 发布）
 
 
 def test_push_view_compress_hides_skipped(tmp_path):
@@ -237,15 +231,15 @@ def test_push_view_compress_hides_skipped(tmp_path):
     svc.release.repo_path = str(tmp_path)
     svc.status.repo_path = str(tmp_path)
     (tmp_path / "changelog.md").write_text("   ", encoding="utf-8")  # 空白：预判有 release 但不发布
-    view._max_rows = lambda: 7   # 4 阶段行 + 3 日志窗口
+    view._max_rows = lambda: 7   # 4 阶段行 + 动作行 + 空行
     view.activate()
     view.handle_key(KEY_ENTER)
     lines = view.render().splitlines()
-    assert "✓ Scan" in lines[0]                          # 竖排阶段行
-    assert len(lines) == 7                                    # 一屏内：阶段行 + 日志
+    # render().splitlines() 会丢弃末尾空行（渲染文本尾部 \n 折叠）
+    assert any("✓ Scan" in ln for ln in lines)             # 竖排阶段行
+    assert 5 <= len(lines) <= 7                              # 一屏内：阶段行 + 动作行
     assert any("- Release" in ln for ln in lines)           # skipped 阶段以 - 呈现
-    assert "Push completed" in lines[-1]                      # 窗口保留最新日志
-    assert "Scanning changes" not in lines                    # 旧日志被窗口挤出
+    assert "Push completed" in lines[-2]                      # 动作行（末行前）
 
 
 def test_push_view_empty_shows_hint():

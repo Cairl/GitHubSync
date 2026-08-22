@@ -544,8 +544,7 @@ def test_push_renders_stage_progress():
     assert any("✓ Scan" in ln for ln in lines)             # 竖排阶段行
     assert any("✓ Commit" in ln for ln in lines)
     assert any("✓ Push" in ln for ln in lines)
-    assert any("Push completed (2 change(s))" in ln for ln in lines)  # 结果进日志流
-    assert any("Scanning changes" in ln for ln in lines)   # 日志流
+    assert any("Push completed (2 change(s))" in ln for ln in lines)  # 动作行=最后结果
     assert "[OK]" not in out and "$ git" not in out        # 无命令回显
     assert svc.git.commits                            # 确实推送了
 
@@ -580,7 +579,7 @@ def test_push_no_changes_renders_stages():
     lines = out.splitlines()
     assert any("✓ Init" in ln for ln in lines)
     assert any("✓ Config" in ln for ln in lines)
-    assert any("Push completed" in ln for ln in lines)  # 结果进日志流
+    assert any("Push completed" in ln for ln in lines)  # 动作行=最后结果
 
 
 def test_push_session_persists_after_tab_switch():
