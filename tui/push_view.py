@@ -1,20 +1,18 @@
-"""推送标签页：推送会话一页流视图（阶段摘要 + 实时日志流，全程一屏）。
+"""推送标签页：推送会话一页流视图（竖排阶段行 + 实时日志流，全程一屏）。
 
 开屏即一页流框架，Enter 推送前后不跳界面：
-- 阶段摘要：首行横排展示全部阶段状态（`[✓ Scan] [✓ Commit] [… Push]`
-  状态符号 + 英文短名），其上不显示任何行；无会话时按当前状态预判
-  待执行阶段（`[· Scan] [· Commit] [· Push]`）；
-- 日志流：下方固定行数窗口，ActionLog 消息逐行追加滚动（ACTION/DONE/
-  NOTE/FAIL/PROGRESS 全量落流，按级别着色），回显详细、自然滚动；
-  会话整体结果（推送完成 / 失败原因）由日志流表达。
+- 阶段行：竖排展示全部阶段，每阶段一行 `  ✓ Scan`（状态符号 + 英文短名），
+  对齐清楚；无会话时按当前状态预判待执行阶段（`· Scan` / `· Commit`），
+  Scan 行显示本次变更数（`· Scan 3 change(s)`），按 Enter 前即可确认；
+- 日志流：下方固定行数窗口，ActionLog 里程碑消息（ACTION/DONE/NOTE/FAIL）
+  逐行追加滚动，按级别着色；会话整体结果（推送完成 / 失败原因）由日志流表达。
 
 阶段标识由 ActionLog.stage 携带（结构化事件驱动）：core 服务在发布时
 标注阶段，表现层按阶段状态机更新，而非解析日志文本。CLI 等纯文本
 消费者忽略该字段，零影响。
 
-实时进度（PROGRESS）：scan/commit/push 阶段进行中发布实时详情——
-扫描到 N 项更改、已提交 N 项更改、push 对象写入百分比（git push
---progress 流式解析），既更新阶段摘要 detail，也追加进日志流。
+推送过程中阶段行只显示符号变化（✓/…/✕），不显示进度细节——变更数只在
+开屏可见，实时进度（PROGRESS）不进日志流、不占阶段行，避免刷屏。
 
 每次 Enter 开启新会话（覆盖上一次结果视图）；切出保留当前会话可切回查看。
 """
@@ -117,15 +115,14 @@ class PushView(ViewBase):
         return markup_to_ansi("\n".join(self._render_lines()))
 
     def _render_lines(self) -> list[str]:
-        """当前视图的 markup 行列表：阶段摘要行 + 日志流窗口。
+        """当前视图的 markup 行列表：竖排阶段行 + 日志流窗口。
 
-        行数恒定 = 1 + 日志窗口（不足补空行占位）。无会话时同样渲染一页流
-        框架（按当前状态预判的待执行阶段 + 空日志窗口），与推送会话行数
-        一致——开屏即一页流，Enter 后仅增量更新，无整屏跳变。阶段摘要之上
-        不显示任何行（无提示文字、无会话头），整体状态由日志流表达。
+        行数恒定 = 阶段行数 + 日志窗口（不足补空行占位）。无会话时同样渲染
+        一页流框架（按当前状态预判的待执行阶段 + 空日志窗口），与推送会话
+        行数一致——开屏即一页流，Enter 后仅增量更新，无整屏跳变。
 
-        无会话时 Scan 阶段显示工作区变更数（如 `[· Scan 2 change(s)]`），
-        按 Enter 前即可确认本次是否有变更。
+        变更数只在开屏显示（Scan 行后 `· Scan 3 change(s)`），推送过程中
+        阶段行只显示符号变化（✓/…/✕），不显示进度细节。
         """
         with self._lock:
             stages = list(self._stages)
@@ -142,29 +139,31 @@ class PushView(ViewBase):
                         f"{info.change_count} 处变化",
                         f"{info.change_count} change(s)")
             logs = []
+        stage_lines = self._stage_lines(stages, show_detail=(session is None))
         limit = self._max_rows() if self._max_rows is not None else None
-        window = max(1, limit - 1) if limit is not None else None
+        window = max(0, limit - len(stage_lines)) if limit is not None else None
         if window is not None:
             tail = logs[-window:]
             padded = [""] * (window - len(tail)) + tail
         else:
             padded = logs
-        return [self._stage_summary_line(stages)] + padded
+        return stage_lines + padded
 
-    def _stage_summary_line(self, stages: list[_Stage]) -> str:
-        """阶段摘要行：`  [✓ Scan] [… Push 100% (13/13) · 2.78 KiB]` 横排。
+    def _stage_lines(self, stages: list[_Stage],
+                     show_detail: bool = False) -> list[str]:
+        """阶段行竖排：`  ✓ Scan` 每阶段一行，符号 + 英文名，对齐清楚。
 
-        PROGRESS 实时进度显示在对应阶段的 detail（如 Push 的对象写入
-        百分比），不占日志流行，避免百分比逐条刷屏。
+        show_detail（开屏）时显示变更数等 detail；推送过程中不显示
+        （进度细节只在开屏可见，推送只表达符号变化）。
         """
-        blocks = []
+        lines = []
         for st in stages:
             sym, color = _STATE_STYLE[st.state]
             label = st.name
-            if st.detail:
+            if show_detail and st.detail:
                 label += f" {st.detail}"
-            blocks.append(f"[{color}][{sym} {label}][/]")
-        return "  " + " ".join(blocks)
+            lines.append(f"  [{color}]{sym}[/] {label}")
+        return lines
 
     def _log_markup(self, level: str, message: str) -> str:
         """日志流单行 markup：`  前缀 消息`，按级别着色。"""

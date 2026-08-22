@@ -541,9 +541,9 @@ def test_push_renders_stage_progress():
         app.run()
     out = app._view
     lines = out.splitlines()
-    assert "[✓ Scan" in lines[0]                          # 首行即阶段摘要
-    assert any("[✓ Commit" in ln for ln in lines)
-    assert any("[✓ Push" in ln for ln in lines)
+    assert any("✓ Scan" in ln for ln in lines)             # 竖排阶段行
+    assert any("✓ Commit" in ln for ln in lines)
+    assert any("✓ Push" in ln for ln in lines)
     assert any("Push completed (2 change(s))" in ln for ln in lines)  # 结果进日志流
     assert any("Scanning changes" in ln for ln in lines)   # 日志流
     assert "[OK]" not in out and "$ git" not in out        # 无命令回显
@@ -551,7 +551,7 @@ def test_push_renders_stage_progress():
 
 
 def test_push_failure_renders_error():
-    """推送失败：阶段摘要失败阶段 ✕，失败原因进日志流。"""
+    """推送失败：阶段行失败阶段 ✕，失败原因进日志流。"""
     svc = make_services(initialized=True, remote="x", files={"a.py": "1"})
     svc.git.fail_mode = "network"  # 持久推送失败 → SyncError
     out_lines = []
@@ -562,7 +562,7 @@ def test_push_failure_renders_error():
         app.run()
     out = app._view
     lines = out.splitlines()
-    assert "[✕ Push" in lines[0]  # 失败阶段
+    assert any("✕ Push" in ln for ln in lines)  # 失败阶段
     assert any("Network error" in ln for ln in lines)  # 失败原因进日志流（✕ FAIL 行）
 
 
@@ -578,8 +578,8 @@ def test_push_no_changes_renders_stages():
     assert svc.git.initialized  # 仓库已初始化
     out = app._view
     lines = out.splitlines()
-    assert "[✓ Init" in lines[0]
-    assert any("[✓ Config" in ln for ln in lines)
+    assert any("✓ Init" in ln for ln in lines)
+    assert any("✓ Config" in ln for ln in lines)
     assert any("Push completed" in ln for ln in lines)  # 结果进日志流
 
 
