@@ -531,7 +531,7 @@ def test_file_ops_push_file_returns_bool():
 
 
 def test_push_renders_stage_progress():
-    """按 Enter 推送：推送页一页流（阶段摘要首行 + 日志流），非 CLI 日志。"""
+    """按 Enter 推送：推送页单行动作行显示结果，非 CLI 日志。"""
     svc = make_services(initialized=True, remote="x", files={"a.py": "1", "b.py": "2"})
     out_lines = []
     app = InteractiveApp(svc, "fake_repo",
@@ -540,17 +540,13 @@ def test_push_renders_stage_progress():
     with pytest.raises(StopIteration):
         app.run()
     out = app._view
-    lines = out.splitlines()
-    assert any("✓ Scan" in ln for ln in lines)             # 竖排阶段行
-    assert any("✓ Commit" in ln for ln in lines)
-    assert any("✓ Push" in ln for ln in lines)
-    assert any("Push completed (2 change(s))" in ln for ln in lines)  # 动作行=最后结果
+    assert "✓ Push completed (2 change(s))" in out.splitlines()[0]  # 动作行=结果
     assert "[OK]" not in out and "$ git" not in out        # 无命令回显
     assert svc.git.commits                            # 确实推送了
 
 
 def test_push_failure_renders_error():
-    """推送失败：阶段行失败阶段 ✕，失败原因进日志流。"""
+    """推送失败：动作行显示失败原因。"""
     svc = make_services(initialized=True, remote="x", files={"a.py": "1"})
     svc.git.fail_mode = "network"  # 持久推送失败 → SyncError
     out_lines = []
@@ -560,13 +556,12 @@ def test_push_failure_renders_error():
     with pytest.raises(StopIteration):
         app.run()
     out = app._view
-    lines = out.splitlines()
-    assert any("✕ Push" in ln for ln in lines)  # 失败阶段
-    assert any("Network error" in ln for ln in lines)  # 失败原因进日志流（✕ FAIL 行）
+    assert "✕" in out.splitlines()[0]
+    assert "Network error" in out.splitlines()[0]  # 失败原因
 
 
 def test_push_no_changes_renders_stages():
-    """无待推内容（如仅初始化仓库）：仍正常执行，会话含初始化/配置阶段。"""
+    """无待推内容（如仅初始化仓库）：仍正常执行，动作行显示结果。"""
     svc = make_services(initialized=False, remote=None)
     out_lines = []
     app = InteractiveApp(svc, "fake_repo",
@@ -576,10 +571,7 @@ def test_push_no_changes_renders_stages():
         app.run()
     assert svc.git.initialized  # 仓库已初始化
     out = app._view
-    lines = out.splitlines()
-    assert any("✓ Init" in ln for ln in lines)
-    assert any("✓ Config" in ln for ln in lines)
-    assert any("Push completed" in ln for ln in lines)  # 动作行=最后结果
+    assert "Push completed" in out.splitlines()[0]  # 动作行=最后结果
 
 
 def test_push_session_persists_after_tab_switch():

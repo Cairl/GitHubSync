@@ -97,21 +97,21 @@ def _make_push_view(**git_kw):
 
 
 def test_push_view_no_porcelain_scan():
-    """日志视图：激活不触发 porcelain 扫描（无文件清单，零 I/O）。"""
+    """动作行视图：激活不触发 porcelain 扫描（无文件清单，零 I/O）。"""
     svc, view, _ = _make_push_view(initialized=True, remote="x",
                                    files={"a.py": "1"})
     base = svc.git.porcelain_calls  # 线束构造时 get_status 已计一次
     view.activate()
     view.activate()
     assert svc.git.porcelain_calls == base  # 懒加载不扫描清单
-    assert "· Scan 1 change(s)" in view.render()  # 空态一页流框架（含变更数）
+    assert "1 change(s)" in view.render()  # 空态显示变更数
     view.invalidate()
     view.activate()
     assert svc.git.porcelain_calls == base  # 失效重扫同样零扫描
 
 
-def test_push_view_enter_renders_stages():
-    """Enter 推送：一页流渲染（竖排阶段行 + 日志流）。"""
+def test_push_view_enter_renders_result():
+    """Enter 推送：动作行显示最后结果（推送完成 N 项更改）。"""
     svc, view, _ = _make_push_view(initialized=True, remote="x",
                                    files={"a.py": "1", "b.py": "2"})
     view.activate()
@@ -120,16 +120,12 @@ def test_push_view_enter_renders_stages():
     assert svc.git.commits                         # 确实提交
     assert svc.git.fetch_calls == 1                # fetch 恰好一次
     out = view.render()
-    lines = out.splitlines()
-    assert any("✓ Scan" in ln for ln in lines)                          # 竖排阶段行
-    assert any("✓ Commit" in ln for ln in lines)
-    assert any("✓ Push" in ln for ln in lines)
-    assert any("Push completed (2 change(s))" in ln for ln in lines)  # 动作行=最后结果
-    assert "[OK]" not in out and "$ git" not in out  # 无日志流回显（动作行无命令输出）
+    assert "✓ Push completed (2 change(s))" in out.splitlines()[0]
+    assert "[OK]" not in out and "$ git" not in out  # 无命令回显
 
 
 def test_push_view_session_persists_across_switch():
-    """会话常驻：切出再切入，阶段结果仍在（无结果锁定，无需重扫）。"""
+    """会话常驻：切出再切入，结果仍在（无结果锁定，无需重扫）。"""
     svc, view, _ = _make_push_view(initialized=True, remote="x",
                                    files={"a.py": "1"})
     view.activate()
@@ -145,54 +141,43 @@ def test_push_view_no_changes_still_syncs():
     view.activate()
     view.handle_key(KEY_ENTER)
     assert svc.git.initialized
-    out = view.render()
-    lines = out.splitlines()
-    assert any("✓ Init" in ln for ln in lines)                          # 竖排阶段行
-    assert any("✓ Config" in ln for ln in lines)
-    assert any("Push completed" in ln for ln in lines)     # 动作行=最后结果
+    assert "Push completed" in view.render().splitlines()[0]
 
 
 def test_push_view_failure_renders_error():
-    """推送失败：失败阶段 ✕，失败原因进日志流。"""
+    """推送失败：动作行显示失败原因。"""
     svc, view, _ = _make_push_view(initialized=True, remote="x",
                                    files={"a.py": "1"})
     svc.git.fail_mode = "network"
     view.activate()
     view.handle_key(KEY_ENTER)
     out = view.render()
-    lines = out.splitlines()
-    assert any("✕ Push" in ln for ln in lines)             # 竖排失败阶段
-    assert any("✓ Scan" in ln for ln in lines)
-    assert any("Network error" in ln for ln in lines)      # 失败原因进日志流（✕ FAIL 行）
+    assert "✕" in out.splitlines()[0]
+    assert "Network error" in out.splitlines()[0]
 
 
-def test_push_view_progress_updates_detail_keeps_state():
-    """PROGRESS 事件：更新阶段 detail 不翻转状态，不进日志流不占阶段行。"""
+def test_push_view_progress_not_rendered():
+    """PROGRESS 实时进度不渲染；里程碑消息覆盖动作行。"""
     from core.events import ActionLog
-    from tui.push_view import _Stage
     svc, view, _ = _make_push_view(initialized=True, remote="x",
                                    files={"a.py": "1"})
     view.activate()
-    # 模拟进行中的 push 会话：手动置阶段状态后发 ACTION + PROGRESS 事件
     with view._lock:
         view._session = "running"
-        view._stages = [_Stage("scan"), _Stage("push")]
     svc.bus.publish(ActionLog("ACTION", "Pushing to GitHub", stage="push"))
-    out = view.render()
-    assert "…" in out and "Push" in out  # push 阶段进行中（竖排任意行）
-
+    assert "> Pushing to GitHub" in view.render().splitlines()[0]
     svc.bus.publish(ActionLog("PROGRESS", "100% (12/12) · 1.20 MiB",
                               stage="push"))
     out = view.render()
-    assert "…" in out and "Push" in out                   # 状态保持 running
-    assert "100% (12/12) · 1.20 MiB" not in out              # 进度不占阶段行/日志流
-    push_stage = next(s for s in view._stages if s.token == "push")
-    assert push_stage.state == "running"             # 不翻转状态
-    assert push_stage.detail == "100% (12/12) · 1.20 MiB"  # detail 仍记录（仅不渲染）
+    assert "> Pushing to GitHub" in out.splitlines()[0]  # 进度不覆盖动作行
+    assert "100% (12/12) · 1.20 MiB" not in out
+    svc.bus.publish(ActionLog("DONE", "Push completed (1 change(s))",
+                              stage="push"))
+    assert "✓ Push completed (1 change(s))" in view.render().splitlines()[0]
 
 
 def test_push_view_progress_via_full_sync(tmp_path):
-    """真实推送流程：阶段行只显示符号，日志流只含里程碑消息。"""
+    """真实推送流程：进度不渲染，动作行显示最后结果。"""
     svc, view, _ = _make_push_view(initialized=True, remote="x",
                                    files={"a.py": "1", "b.py": "2"})
     svc.sync.repo_path = str(tmp_path)
@@ -201,11 +186,9 @@ def test_push_view_progress_via_full_sync(tmp_path):
     view.activate()
     view.handle_key(KEY_ENTER)
     out = view.render()
-    lines = out.splitlines()
     assert "16% (1/6)" not in out            # 进度不占行
-    assert any("✓ Push" in ln for ln in lines)  # 阶段行只显示符号
     assert "512 B" not in out                # 进度 detail 不渲染
-    assert any("Push completed (2 change(s))" in ln for ln in lines)  # 动作行=结果
+    assert "✓ Push completed (2 change(s))" in out.splitlines()[0]
 
 
 def test_push_view_release_stage_published(tmp_path):
@@ -219,78 +202,57 @@ def test_push_view_release_stage_published(tmp_path):
     view.handle_key(KEY_ENTER)
     assert svc.gh.published                     # Release 确实发布
     out = view.render()
-    lines = out.splitlines()
-    assert any("✓ Release" in ln for ln in lines)          # 竖排阶段行
-    assert any("Published" in ln for ln in lines)          # 动作行=最后结果（release 发布）
+    assert "Published" in out.splitlines()[0]   # 动作行=最后结果（release 发布）
 
 
-def test_push_view_compress_hides_skipped(tmp_path):
-    """max_rows 超限：日志流窗口压缩至剩余行数，阶段行保留一屏内。"""
+def test_push_view_single_line_layout(tmp_path):
+    """单行动作行布局：行数恒定 1 + 空行占位，无阶段行。"""
     svc, view, _ = _make_push_view(initialized=True, remote="x")
     svc.sync.repo_path = str(tmp_path)
     svc.release.repo_path = str(tmp_path)
     svc.status.repo_path = str(tmp_path)
-    (tmp_path / "changelog.md").write_text("   ", encoding="utf-8")  # 空白：预判有 release 但不发布
-    view._max_rows = lambda: 7   # 4 阶段行 + 动作行 + 空行
+    (tmp_path / "changelog.md").write_text("   ", encoding="utf-8")  # 空白：有 release 预判但不发布
+    view._max_rows = lambda: 5
     view.activate()
     view.handle_key(KEY_ENTER)
-    lines = view.render().splitlines()
-    # render().splitlines() 会丢弃末尾空行（渲染文本尾部 \n 折叠）
-    assert any("✓ Scan" in ln for ln in lines)             # 竖排阶段行
-    assert 5 <= len(lines) <= 7                              # 一屏内：阶段行 + 动作行
-    assert any("- Release" in ln for ln in lines)           # skipped 阶段以 - 呈现
-    assert "Push completed" in lines[-2]                      # 动作行（末行前）
+    lines = view._render_lines()
+    assert len(lines) == 5                                     # 1 动作行 + 4 空行
+    assert any("Push completed" in ln for ln in lines)         # 动作行=结果
+    assert not any("Scan" in ln or "Commit" in ln or "Push" in ln
+                   for ln in lines if "Push completed" not in ln)  # 无阶段行
 
 
 def test_push_view_empty_shows_hint():
-    """空会话：推送页竖排预判阶段框架，无顶部提示文字。"""
+    """空会话（无变更）：无提示文字，内容为空。"""
     svc, view, _ = _make_push_view(initialized=True, remote="x")
     view.activate()
     out = view.render()
-    lines = out.splitlines()
-    assert "· Scan" in lines[0]                             # 竖排阶段行
-    assert "· Commit" in out
-    assert "· Push" in out
-    assert "Press Enter to push" not in out               # 无提示文字
+    assert out.strip() == ""                # 无变更无内容
+    assert "Press Enter to push" not in out  # 无提示文字
 
 
 def test_push_view_idle_shows_change_count():
-    """开屏按 Enter 前显示本次变更数（Scan 阶段 detail），无变更时不显示。"""
-    # 有变更：Scan 阶段显示 N change(s)
+    """开屏按 Enter 前显示本次变更数，无变更时不显示。"""
+    # 有变更：显示 N change(s)
     svc, view, _ = _make_push_view(initialized=True, remote="x",
                                    files={"a.py": "1", "b.py": "2"})
     view.activate()
     out = view.render()
-    assert "· Scan 2 change(s)" in out.splitlines()[0]
-    # 无变更：Scan 阶段无 detail
+    assert "2 change(s)" in out.splitlines()[0]
+    # 无变更：内容为空
     svc, view, _ = _make_push_view(initialized=True, remote="x")
     view.activate()
     out = view.render()
-    assert "· Scan" in out.splitlines()[0]
-    assert "change(s)" not in out.splitlines()[0]
+    assert "change(s)" not in out
 
 
-def test_push_view_empty_preplans_stages_by_status():
-    """NO_REPO：空会话预判 init/config 阶段（与推送阶段一致，不跳界面）。"""
+def test_push_view_no_repo_idle_empty():
+    """NO_REPO：空会话无内容（无变更数），不显示差异摘要。"""
     svc, view, _ = _make_push_view(initialized=False, remote=None)
     view.activate()
     out = view.render()
-    assert "· Init" in out
-    assert "· Config" in out
-    assert "· Scan" in out
-    assert "not a git repository" not in out  # 不再显示差异摘要
-
-
-def test_push_view_release_pending_preplans_release(tmp_path):
-    """changelog 待发布：空会话预判含 Release 阶段。"""
-    svc, view, _ = _make_push_view(initialized=True, remote="x")
-    svc.sync.repo_path = str(tmp_path)
-    svc.release.repo_path = str(tmp_path)
-    svc.status.repo_path = str(tmp_path)
-    (tmp_path / "changelog.md").write_text("notes", encoding="utf-8")
-    view._get_info = lambda: svc.status.get_status(fetch=False)  # 动态取（探测新路径）
-    view.activate()
-    assert "· Release" in view.render()
+    assert out.strip() == ""
+    assert "not a git repository" not in out
 
 
 def test_push_view_idle_to_session_same_rowcount():
@@ -299,12 +261,12 @@ def test_push_view_idle_to_session_same_rowcount():
                                    files={"a.py": "1", "b.py": "2"})
     view._max_rows = lambda: 6
     view.activate()
-    idle_lines = view._render_lines()          # 空态一页流（含空行占位）
+    idle_lines = view._render_lines()          # 空态（含空行占位）
     view.handle_key(KEY_ENTER)
     session_lines = view._render_lines()
     assert len(idle_lines) == len(session_lines) == 6  # 行数恒定
-    assert "Scan 2 change(s)" in idle_lines[0]   # 开屏竖排阶段行（含变更数，跳过符号标签）
-    assert "✓" in session_lines[0] and "Scan" in session_lines[0]
+    assert "2 change(s)" in idle_lines[0]   # 开屏显示变更数
+    assert "Push completed" in session_lines[0]
 
 
 # ── PullView ──
@@ -561,11 +523,12 @@ def test_empty_state_none_colored_gray(monkeypatch, tmp_path):
     """四个标签页空态 none 均以 #636363 灰色渲染（ANSI 38;2;99;99;99）。"""
     import tui.renderer
     monkeypatch.setattr(tui.renderer, "supports_color", lambda stream: True)
-    gray = "\x1b[38;2;99;99;99m"
-    # 推送（空会话：阶段行符号灰色 #636363 占位色）
-    _, push, _ = _make_push_view(initialized=True, remote="x")
+    gray = "\x1b[38;2;99;99;99m"  # #636363 占位色
+    gray2 = "\x1b[38;2;139;148;158m"  # #8B949E 次要色（变更数 COLOR_GRAY）
+    # 推送（空会话：变更数灰色显示）
+    _, push, _ = _make_push_view(initialized=True, remote="x", files={"a.py": "1"})
     push.activate()
-    assert gray in push.render() and "Scan" in push.render()
+    assert gray2 in push.render() and "1 change(s)" in push.render()
     # 拉取（无提交历史）
     _, pull = _make_pull_view(initialized=True, remote="x", commits=[])
     pull.activate()

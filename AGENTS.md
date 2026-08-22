@@ -177,7 +177,7 @@ python -m main
 - **禁止在渲染路径中执行子进程调用**（`build_screen`/`render_*` 只读缓存）
 
 ### 无回显化（同步操作结果由视图状态表达）
-- 推送：`PushView`（`tui/push_view.py`）推送会话一页流视图——按 Enter 后按状态预构建阶段清单（init/config/scan/commit/push/release），一页内同时呈现：竖排阶段行（每阶段一行 `  ✓ Scan`，状态符号 `·` 未开始 / `…` 进行中 / `✓` 完成 / `✕` 失败 / `-` 未执行 + 英文短名，对齐清楚；无会话时 Scan 行显示工作区变更数 `· Scan 2 change(s)`，按 Enter 前即可确认本次变更，推送过程阶段行只显示符号变化）、动作行（阶段行下方固定一行，覆盖式显示当前动作 `> 推送到 GitHub`，不累积不滚动，结束即显示最后结果 `✓ 推送完成（N 项更改）` / `✕ 失败原因`）；`git push --progress` 经 `run_command_stream` 流式解析，PROGRESS 事件只更新内部 detail 不渲染，避免进度刷屏；git 仍为一次 commit + push
+- 推送：`PushView`（`tui/push_view.py`）推送会话单行动作回显——无会话时单行显示本次变更数（`  3 change(s)`，灰色；无变更时为空），按 Enter 前即可确认本次变更；推送过程同一行覆盖式显示当前动作（`> 推送到 GitHub`），不累积、不滚动，结束即显示最后结果（`✓ 推送完成（N 项更改）` / `✕ 失败原因`）；`git push --progress` 经 `run_command_stream` 流式解析，PROGRESS 事件不渲染避免刷屏；git 仍为一次 commit + push
 - 拉取：`PullView`（`tui/pull_view.py`）通过 `GitProvider.remote_head()` 取远程跟踪引用，本地与远程一致的提交 hash 标浅绿 `COLOR_CYAN`（#ABDFA7，与 [✓] 同色），其余不变色
 - 文件标签页：`FileOpsService.push_file/remove_file` 返回 bool，失败文件行首 `[!]`（红），按钮状态切换即成功指示
 - 失败原因由 i18n 可读消息表达（`推送失败: 网络连接异常…`），原始命令输出落盘 logs/ 供 AI 调试（排查用 CLI `status`）
